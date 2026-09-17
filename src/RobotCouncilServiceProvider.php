@@ -4,24 +4,21 @@ declare(strict_types=1);
 
 namespace JoshDaugherty\RobotCouncil;
 
-use JoshDaugherty\RobotCouncil\Commands\RobotCouncilCommand;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 
+/**
+ * Registers the package with a Laravel application through `spatie/laravel-package-tools`.
+ */
 final class RobotCouncilServiceProvider extends PackageServiceProvider
 {
+    /**
+     * Declare the package's name and the resources it registers.
+     *
+     * @param  Package  $package  The package definition to configure.
+     */
     public function configurePackage(Package $package): void
     {
-        /*
-         * This class is a Package Service Provider
-         *
-         * More info: https://github.com/spatie/laravel-package-tools
-         */
-        $package
-            ->name('robot-council')
-            ->hasConfigFile()
-            ->hasViews()
-            ->hasMigration('create_robot_council_table')
-            ->hasCommand(RobotCouncilCommand::class);
+        $package->name('robot-council');
     }
 }

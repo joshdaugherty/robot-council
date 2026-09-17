@@ -39,14 +39,12 @@
     },
     "autoload": {
         "psr-4": {
-            "JoshDaugherty\\RobotCouncil\\": "src/",
-            "JoshDaugherty\\RobotCouncil\\Database\\Factories\\": "database/factories/"
+            "JoshDaugherty\\RobotCouncil\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "JoshDaugherty\\RobotCouncil\\Tests\\": "tests/",
-            "Workbench\\App\\": "workbench/app/"
+            "JoshDaugherty\\RobotCouncil\\Tests\\": "tests/"
         }
     },
     "scripts": {
@@ -70,10 +68,7 @@
         "laravel": {
             "providers": [
                 "JoshDaugherty\\RobotCouncil\\RobotCouncilServiceProvider"
-            ],
-            "aliases": {
-                "RobotCouncil": "JoshDaugherty\\RobotCouncil\\Facades\\RobotCouncil"
-            }
+            ]
         }
     },
     "minimum-stability": "dev",

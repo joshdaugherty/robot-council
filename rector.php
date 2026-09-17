@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Pest\Rector\Set\PestSetList;
 use Rector\CodeQuality\Rector\ClassMethod\LocallyCalledStaticMethodToNonStaticRector;
-use Rector\CodingStyle\Rector\ClassMethod\MakeInheritedMethodVisibilitySameAsParentRector;
 use Rector\Config\RectorConfig;
 use Rector\DeadCode\Rector\ClassMethod\RemoveDuplicatedReturnSelfDocblockRector;
 use Rector\DeadCode\Rector\ClassMethod\RemoveEmptyClassMethodRector;
@@ -18,8 +17,6 @@ return RectorConfig::configure()
     // The same paths PHPStan analyzes.
     ->withPaths([
         __DIR__.'/src',
-        __DIR__.'/config',
-        __DIR__.'/database',
         __DIR__.'/tests',
         __FILE__,
     ])
@@ -50,13 +47,6 @@ return RectorConfig::configure()
         // `@var` pinning a value that arrives untyped, and `@return $this` beside `: static`.
         RemoveUselessVarTagRector::class,
         RemoveDuplicatedReturnSelfDocblockRector::class,
-
-        // Pest's `strict()` arch preset forbids protected methods, and PHP allows a subclass to
-        // widen one, so the facade declares `getFacadeAccessor()` public. This rule would narrow it
-        // back to the parent's `protected`; it still applies everywhere else.
-        MakeInheritedMethodVisibilitySameAsParentRector::class => [
-            __DIR__.'/src/Facades/RobotCouncil.php',
-        ],
     ])
     ->withPreparedSets(
         deadCode: true,

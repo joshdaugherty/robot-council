@@ -16,6 +16,8 @@ use Rector\Php82\Rector\Class_\ReadOnlyClassRector;
 return RectorConfig::configure()
     // The same paths PHPStan analyzes.
     ->withPaths([
+        __DIR__.'/config',
+        __DIR__.'/routes',
         __DIR__.'/src',
         __DIR__.'/tests',
         __FILE__,

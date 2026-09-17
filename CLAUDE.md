@@ -25,7 +25,7 @@ A **Laravel package** (`joshdaugherty/robot-council`), not an application. It wa
 
 ## Things that are easy to get wrong
 
-- **Every API must exist in the lowest supported Laravel version.** `composer.json` admits Laravel `^13.20.0` (`illuminate/contracts`), but the development install resolves the newest. The floor is the lowest release CI can test: its `prefer-lowest` cells resolve `laravel/framework` v13.20.0, because Pest 5 with `pestphp/pest-plugin-laravel` 5.0.0 resolves nothing lower. Move the constraint whenever that tested floor moves, for example after raising a Pest constraint.
+- **Every API must exist in the lowest supported Laravel version.** `composer.json` admits Laravel `^13.23.0` (`illuminate/contracts`), but the development install resolves the newest. The floor is the lowest release CI can test: its `prefer-lowest` cells resolve `laravel/framework` v13.23.0, because `pestphp/pest-plugin-laravel ^5.0.1` requires it. Move the constraint whenever that tested floor moves, for example after raising a Pest constraint.
 - **`composer.lock` is gitignored.** Every CI run and every fresh install resolves dependencies anew, so an unchanged branch can go red later. Compare resolved versions before blaming a diff (see `measurement-parity`).
 - **CI is one workflow with one required check.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to `main`, with no path filters:
   - `tests` runs `vendor/bin/pest --ci` on ubuntu and windows × PHP 8.5 and 8.4 × Laravel 13 × `prefer-lowest` and `prefer-stable`, with `fail-fast: false`, on Pest 5 and PHPUnit 13.

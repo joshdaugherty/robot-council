@@ -1,6 +1,6 @@
-# robot-council
+# robot-council/core
 
-[![CI](https://github.com/joshdaugherty/robot-council/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/joshdaugherty/robot-council/actions/workflows/ci.yml?query=branch%3Amain)
+[![CI](https://github.com/robot-council/core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/robot-council/core/actions/workflows/ci.yml?query=branch%3Amain)
 
 A Laravel package in early development. It registers a service provider and has no features yet.
 

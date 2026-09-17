@@ -1,12 +1,11 @@
 {
-    "name": "joshdaugherty/robot-council",
+    "name": "robot-council/core",
     "description": "This is my package robot-council",
     "keywords": [
-        "joshdaugherty",
         "laravel",
         "robot-council"
     ],
-    "homepage": "https://github.com/joshdaugherty/robot-council",
+    "homepage": "https://github.com/robot-council/core",
     "license": "MIT",
     "authors": [
         {
@@ -34,12 +33,12 @@
     },
     "autoload": {
         "psr-4": {
-            "JoshDaugherty\\RobotCouncil\\": "src/"
+            "RobotCouncil\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "JoshDaugherty\\RobotCouncil\\Tests\\": "tests/"
+            "RobotCouncil\\Tests\\": "tests/"
         }
     },
     "scripts": {
@@ -62,7 +61,7 @@
     "extra": {
         "laravel": {
             "providers": [
-                "JoshDaugherty\\RobotCouncil\\RobotCouncilServiceProvider"
+                "RobotCouncil\\RobotCouncilServiceProvider"
             ]
         }
     }

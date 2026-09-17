@@ -9,7 +9,7 @@ declare(strict_types=1);
  * @command  vendor/bin/pest --compact tests/ExampleTest.php
  */
 
-use JoshDaugherty\RobotCouncil\RobotCouncilServiceProvider;
+use RobotCouncil\RobotCouncilServiceProvider;
 
 it('registers the package service provider', function (): void {
     expect(app()->getProvider(RobotCouncilServiceProvider::class))

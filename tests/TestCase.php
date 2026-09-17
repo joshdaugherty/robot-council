@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace JoshDaugherty\RobotCouncil\Tests;
+namespace RobotCouncil\Tests;
 
 use Illuminate\Foundation\Application;
-use JoshDaugherty\RobotCouncil\RobotCouncilServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
+use RobotCouncil\RobotCouncilServiceProvider;
 
 /**
  * Base test case: boots a Testbench application with the package's service provider registered.

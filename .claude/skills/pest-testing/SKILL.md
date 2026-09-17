@@ -56,7 +56,7 @@ it('can test', function () {
 - Run everything: `composer test` (which runs `vendor/bin/pest`) or `vendor/bin/pest --compact`.
 - Coverage: `composer test-coverage` (needs a coverage driver; see the
   [`pcov-setup`](../pcov-setup/SKILL.md) skill).
-- CI's `run-tests` workflow runs `vendor/bin/pest --ci` across its OS / PHP / Laravel matrix.
+- CI's `tests` job in `.github/workflows/ci.yml` runs `vendor/bin/pest --ci` across its OS / PHP / Laravel matrix.
 
 `phpunit.xml.dist` sets `executionOrder="random"`, `failOnRisky`, `failOnWarning`, and
 `beStrictAboutOutputDuringTests`, so an order-dependent test flakes and a test that prints output

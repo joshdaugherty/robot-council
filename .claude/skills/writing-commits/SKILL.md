@@ -42,9 +42,7 @@ the user can copy it cleanly.
 | `style` | Changes that don't affect code meaning (whitespace, formatting, missing semicolons, etc.). |
 | `test` | Adding missing tests or correcting existing tests. |
 
-Two kinds of commit are written by workflows, not by hand, and do not follow this convention:
-`Fix styling` (the Pint workflow, pushed to the branch) and `Update CHANGELOG` (the changelog
-workflow, pushed to `main`). Dependabot writes its own subjects too.
+Dependabot writes its own commit subjects, which do not follow this convention.
 
 ## Body
 
@@ -100,7 +98,7 @@ The test suite itself is not the usual source. Its outputs land in ignored paths
 
 - **`composer format` / `vendor/bin/pint` with no path** reformats every PHP file that deviates from the preset, not only the ones you touched. `vendor/bin/pint --dirty` limits it to uncommitted files.
 - **`vendor/bin/phpstan analyse --generate-baseline`** rewrites the tracked `phpstan-baseline.neon` with every current error, including ones your change did not introduce.
-- **`composer require … --no-update`**, the way `run-tests` pins a Laravel and Testbench version, edits `composer.json`. Reproducing a CI matrix cell locally leaves that edit behind.
+- **`composer require … --no-update`**, the way the CI `tests` job pins a Laravel and Testbench version, edits `composer.json`. Reproducing a CI matrix cell locally leaves that edit behind.
 - **Untracked scratch** — notes, fixtures, and generated files accrete over a branch's life, and nothing in `.gitignore` covers them.
 
 So the sequence before every commit:

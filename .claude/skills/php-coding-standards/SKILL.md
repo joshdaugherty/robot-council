@@ -302,9 +302,8 @@ unset(
 ## 14. Verification
 
 - Run `vendor/bin/pint --dirty` before finalizing; it fixes the files with uncommitted changes.
-  (`--test` only reports and fixes nothing.) Formatting locally matters here: the
-  `Fix PHP code style issues` workflow runs Pint on push and commits "Fix styling" back to the
-  pushed branch, which leaves your local branch behind its remote.
+  (`--test` only reports and fixes nothing.) Formatting locally matters here: the CI `pint` job
+  runs `vendor/bin/pint --test`, so an unformatted file fails `ci-passed` and blocks the merge.
 - Run the affected tests with `vendor/bin/pest --compact tests/ExampleTest.php` or
   `vendor/bin/pest --compact --filter='test name'`.
 - Run `composer analyse` when signatures, types, or contracts changed.

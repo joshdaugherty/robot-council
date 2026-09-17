@@ -17,7 +17,7 @@ A **Laravel package** (`joshdaugherty/robot-council`), not an application. It wa
 | Tests | `composer test` (`vendor/bin/pest`); one file or test: `vendor/bin/pest --compact tests/ExampleTest.php --filter=...` |
 | Coverage | `composer test-coverage` (needs PCOV or Xdebug; see the `pcov-setup` skill) |
 | Mutation | `vendor/bin/pest --mutate --path=src --class="JoshDaugherty\RobotCouncil\<Class>"` |
-| Static analysis | `composer analyse` (PHPStan with Larastan, level 5, `phpstan-baseline.neon`) |
+| Static analysis | `composer analyse` (PHPStan with Larastan, level `max` with bleeding edge, `phpstan-baseline.neon`) |
 | Format | `vendor/bin/pint --dirty`; check only: `vendor/bin/pint --test` |
 | Refactor | `composer refactor` (Rector; see `rector.php`); check only: `composer test:refactor` |
 

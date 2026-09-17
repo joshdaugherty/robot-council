@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Access\Tokens;
 use RobotCouncil\Http\Principal;
+use RobotCouncil\Http\Rules\BoundedMeta;
 use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Support\FleetEvents;
 use Symfony\Component\HttpFoundation\Response;
@@ -38,7 +39,7 @@ final class PostNarrationController
     {
         $request->validate([
             'body' => ['required', 'string', 'max:'.self::MAX_BODY],
-            'meta' => ['sometimes', 'array'],
+            'meta' => ['sometimes', 'array', new BoundedMeta],
         ]);
 
         $session = Principal::agentSession($request);

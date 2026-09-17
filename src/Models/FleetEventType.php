@@ -41,4 +41,22 @@ enum FleetEventType: string
     {
         return $this === self::Narration;
     }
+
+    /**
+     * The types whose visibility depends on who is reading.
+     *
+     * The feed's query is built from this rather than from a hardcoded comparison, so adding a
+     * restricted type is a matter of declaring it restricted. The other way round fails open: the
+     * new type would be served to every reader, and the one place a reviewer looks to confirm the
+     * boundary would be the place that does not enforce it.
+     *
+     * @return list<string> The restricted types, as stored.
+     */
+    public static function restrictedValues(): array
+    {
+        return array_values(array_map(
+            static fn (self $type): string => $type->value,
+            array_filter(self::cases(), static fn (self $type): bool => $type->isRestricted())
+        ));
+    }
 }

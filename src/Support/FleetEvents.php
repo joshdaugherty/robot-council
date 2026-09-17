@@ -18,18 +18,26 @@ use RobotCouncil\Models\FleetEventType;
  *
  * **Events have to commit in ID order.** An agent without a push connection reads this feed by
  * paging an ID cursor, so an insert that takes its ID early and commits late would be skipped
- * forever by a reader that had already passed it. Postgres hands out sequence values outside the
- * transaction, which makes that gap real; SQLite serializes writers and does not.
+ * forever by a reader that had already passed it -- permanently, because paging is `id > cursor`.
+ *
+ * Both Postgres and MySQL make that gap real. Postgres draws sequence values outside the
+ * transaction, and InnoDB hands out `AUTO_INCREMENT` values at insert time, so under
+ * `innodb_autoinc_lock_mode=2` -- the MySQL 8 default -- two transactions can take 5 and 6 and
+ * commit 6 first. SQLite serializes writers and cannot. Rather than one branch per driver, every
+ * writer takes a row lock on a single sentinel row, which is transaction-scoped everywhere,
+ * releases on commit and on rollback with no hook to forget, and collides with nothing a host owns.
  */
 final class FleetEvents
 {
     /**
-     * The advisory lock every writer takes before inserting, so one feed has one writer at a time.
-     *
-     * The number is arbitrary and only has to be stable: it is the RFC the enrollment flow follows,
-     * which makes it recognizable in `pg_locks` rather than looking like a stray constant.
+     * The table holding the one row every writer locks before inserting.
      */
-    public const int FEED_LOCK_KEY = 8628;
+    public const string LOCK_TABLE = 'robot_council_feed_lock';
+
+    /**
+     * The row every writer locks. There is only ever one.
+     */
+    public const int LOCK_ROW = 1;
 
     /**
      * @param  SlackMirror  $slack  Whether, and where, to mirror an event to Slack.
@@ -79,18 +87,14 @@ final class FleetEvents
     /**
      * Take the feed's writer lock for the rest of the transaction.
      *
-     * `pg_advisory_xact_lock` releases when the transaction ends, committed or rolled back, so
-     * nothing here can leak a lock. On any other driver this does nothing, because no other driver
-     * the package supports lets a later ID commit first.
+     * Taken **before** the insert, which is the whole point: an ID drawn before the lock is an ID
+     * that can commit out of order, and a drawn ID is not given back by a rollback.
+     *
+     * SQLite compiles `for update` to nothing, which is correct rather than a gap: it takes a
+     * write lock for the whole transaction on its own.
      */
     private function holdTheFeed(): void
     {
-        $connection = DB::connection();
-
-        if ($connection->getDriverName() !== 'pgsql') {
-            return;
-        }
-
-        $connection->statement('select pg_advisory_xact_lock(?)', [self::FEED_LOCK_KEY]);
+        DB::table(self::LOCK_TABLE)->where('id', self::LOCK_ROW)->lockForUpdate()->first();
     }
 }

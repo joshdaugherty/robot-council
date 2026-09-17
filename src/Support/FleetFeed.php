@@ -31,18 +31,44 @@ final class FleetFeed
     /**
      * Read the events after a cursor that this session may see.
      *
+     * **The page is a window of IDs, not a window of results.** Applying the limit after the
+     * visibility filter would mean a reader whose window is entirely another developer's narration
+     * gets an empty page and a cursor that cannot move -- so every later poll rescans the same
+     * growing tail, for as long as the feed lives. Any holder of `events:post` could arrange that
+     * for the whole fleet by narrating. Paging the ID space instead means a page may be short, or
+     * empty, but the cursor always advances.
+     *
      * @param  AgentSession  $reader  The session doing the reading.
      * @param  int  $after  The last event ID the reader has already seen.
-     * @param  int  $limit  How many to return at most.
-     * @return list<array<string, mixed>> The events, oldest first, each with its provenance.
+     * @param  int  $limit  How many events to examine.
+     * @return array{events: list<array<string, mixed>>, cursor: int} The visible events and where
+     *                                                                to read from next.
      */
     public function after(AgentSession $reader, int $after, int $limit): array
     {
-        $events = FleetEvent::query()
+        $window = FleetEvent::query()
             ->where('id', '>', $after)
+            ->orderBy('id')
+            ->limit(max(1, min($limit, self::MAX_PAGE)))
+            ->pluck('id');
+
+        if ($window->isEmpty()) {
+            return ['events' => [], 'cursor' => $after];
+        }
+
+        // Everything up to here has been examined, whether or not this reader may see it
+        $highest = $window->max();
+
+        $cursor = \is_int($highest) ? $highest : (int) (\is_numeric($highest) ? $highest : $after);
+
+        $events = FleetEvent::query()
+            ->whereKey($window->all())
             ->where(function (Builder $query) use ($reader): void {
                 // Everything that is not narration, plus the narration this reader may see
-                $query->where('type', '!=', FleetEventType::Narration->value)
+                // Asked of the enum rather than hardcoded, so a later restricted type is
+                // restricted by declaring itself so rather than by somebody remembering to edit
+                // this clause. Getting that wrong fails open.
+                $query->whereNotIn('type', FleetEventType::restrictedValues())
                     ->orWhere('posted_with_coordinator', true)
                     ->orWhereIn(
                         'agent_session_id',
@@ -50,7 +76,6 @@ final class FleetFeed
                     );
             })
             ->orderBy('id')
-            ->limit(max(1, min($limit, self::MAX_PAGE)))
             ->get();
 
         $logins = $this->loginsFor($events->pluck('agent_session_id')->all());
@@ -58,7 +83,7 @@ final class FleetFeed
         /** @var list<array<string, mixed>> $described */
         $described = $events->map(fn (FleetEvent $event): array => $this->describe($event, $logins))->values()->all();
 
-        return $described;
+        return ['events' => $described, 'cursor' => $cursor];
     }
 
     /**

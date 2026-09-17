@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace RobotCouncil\Jobs;
 
+use DateTimeInterface;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
-use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Queue\Attributes\Tries;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\RateLimited;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use RobotCouncil\Models\FleetEvent;
@@ -18,6 +19,7 @@ use RobotCouncil\RobotCouncilServiceProvider;
 use RobotCouncil\Support\HostUsers;
 use RobotCouncil\Support\SlackMirror;
 use RuntimeException;
+use Throwable;
 
 /**
  * Posts one event to Slack, for humans to read.
@@ -30,7 +32,6 @@ use RuntimeException;
  * table and copied into any failed-job record, so an event body, its metadata, and the webhook URL
  * would all be sitting in the database for as long as those rows live.
  */
-#[Tries(5)]
 final class MirrorEventToSlack implements ShouldQueue
 {
     use Dispatchable;
@@ -41,6 +42,22 @@ final class MirrorEventToSlack implements ShouldQueue
      * @param  int  $eventId  The event to mirror.
      */
     public function __construct(public readonly int $eventId) {}
+
+    /**
+     * How long the fleet keeps trying one event before dropping it.
+     *
+     * A deadline rather than a count of attempts. `RateLimited` releases a job when the limit is
+     * hit, and a release spends an attempt, so a fleet narrating faster than Slack's limit would
+     * burn a small `tries` on pacing alone and fail perfectly good events into the host's
+     * `failed_jobs` table. An hour is long enough to drain a burst and short enough that a genuinely
+     * broken webhook stops filling the queue.
+     *
+     * @return DateTimeInterface When to give up on this event.
+     */
+    public function retryUntil(): DateTimeInterface
+    {
+        return Carbon::now()->addHour();
+    }
 
     /**
      * Keep the fleet inside Slack's tolerance without every worker discovering it separately.
@@ -77,9 +94,20 @@ final class MirrorEventToSlack implements ShouldQueue
         }
 
         try {
-            $response = Http::asJson()->post($url, ['text' => $this->text($event, $hostUsers)]);
-        } catch (ConnectionException) {
-            // Rethrown without the original. Its message carries the full webhook URL, and an
+            $response = Http::asJson()
+                // Bounded explicitly. The client's defaults are 10 seconds to connect and 30 to
+                // read, and on a host whose queue connection is `sync` this job runs inline in the
+                // request -- so an unhealthy Slack would otherwise add half a minute to every
+                // narration and every session start.
+                ->connectTimeout(5)
+                ->timeout(10)
+                ->post($url, ['text' => $this->text($event, $hostUsers)]);
+        } catch (Throwable) {
+            // Every throwable, not only `ConnectionException`. A malformed webhook URL raises
+            // Guzzle's `MalformedUriException`, which is not marshalled into a connection failure
+            // and would otherwise sail past this catch carrying the configured host.
+            //
+            // Rethrown without the original: its message carries the full webhook URL, and an
             // exception is written to the failed-jobs table, to the log, and to whatever error
             // reporter the host application uses.
             throw new RuntimeException('robot-council could not reach the Slack webhook.');
@@ -91,7 +119,9 @@ final class MirrorEventToSlack implements ShouldQueue
             return;
         }
 
-        if ($response->failed()) {
+        // Anything but a 2xx, rather than `failed()`, which is only 4xx and 5xx: a redirect would
+        // otherwise read as delivered while the message went nowhere
+        if (! $response->successful()) {
             throw new RuntimeException(sprintf('Slack refused a mirrored event with HTTP %d.', $response->status()));
         }
     }

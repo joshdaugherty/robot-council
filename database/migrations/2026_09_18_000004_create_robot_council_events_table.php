@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -21,12 +22,29 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // One row, locked with `select ... for update` by every writer before it inserts. A row
+        // lock rather than a Postgres advisory key, because the ordering problem is not Postgres's
+        // alone: InnoDB hands out `AUTO_INCREMENT` values at insert time too, and under
+        // `innodb_autoinc_lock_mode=2` -- the MySQL 8 default -- two transactions can take 5 and 6
+        // and commit 6 first. A row lock is transaction-scoped on every driver, releases on commit
+        // and on rollback without a hook, and collides with nothing a host owns.
+        Schema::create('robot_council_feed_lock', function (Blueprint $table): void {
+            $table->id();
+        });
+
+        DB::table('robot_council_feed_lock')->insert(['id' => 1]);
+
         Schema::create('robot_council_events', function (Blueprint $table): void {
             $table->id();
 
             // Null for an event the service recorded rather than a session
+            // Indexed explicitly. `constrained()` emits a foreign key and no index, and only
+            // MySQL creates one for the constraint server-side -- so on Postgres and SQLite both
+            // the feed's visibility filter and this constraint's own delete cascade would be
+            // full-table scans.
             $table->foreignId('agent_session_id')
                 ->nullable()
+                ->index()
                 ->constrained('robot_council_agent_sessions')
                 ->nullOnDelete();
 
@@ -43,8 +61,10 @@ return new class extends Migration
             // was held, nor reveal what was said before it was granted
             $table->boolean('posted_with_coordinator')->default(false);
 
-            // Only `created_at`. An event is a fact about a moment and is never edited.
-            $table->timestamp('created_at')->nullable()->index();
+            // Only `created_at`. An event is a fact about a moment and is never edited. No index
+            // on it: the feed is read by ID cursor and never by time, so an index here would be
+            // write cost on the hot append path and nothing would read it.
+            $table->timestamp('created_at')->nullable();
         });
     }
 
@@ -54,5 +74,6 @@ return new class extends Migration
     public function down(): void
     {
         Schema::dropIfExists('robot_council_events');
+        Schema::dropIfExists('robot_council_feed_lock');
     }
 };

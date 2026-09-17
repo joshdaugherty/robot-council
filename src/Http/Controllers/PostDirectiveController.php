@@ -7,6 +7,7 @@ namespace RobotCouncil\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RobotCouncil\Http\Principal;
+use RobotCouncil\Http\Rules\BoundedMeta;
 use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Support\FleetEvents;
 use Symfony\Component\HttpFoundation\Response;
@@ -36,7 +37,7 @@ final class PostDirectiveController
     {
         $request->validate([
             'body' => ['required', 'string', 'max:'.self::MAX_BODY],
-            'meta' => ['sometimes', 'array'],
+            'meta' => ['sometimes', 'array', new BoundedMeta],
         ]);
 
         $meta = $request->input('meta');

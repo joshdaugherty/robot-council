@@ -110,6 +110,21 @@ return [
     'slack' => [
         'webhook_url' => env('ROBOT_COUNCIL_SLACK_WEBHOOK_URL'),
         'queue' => env('ROBOT_COUNCIL_SLACK_QUEUE', 'robot-council-slack'),
+
+        // The queue connection the mirror runs on. Leave it null to use the application's
+        // default, but note what `sync` means here: the job runs inline inside the agent's own
+        // request, `queue` above is ignored, a rate-limit release is silently dropped, and a
+        // Slack failure surfaces on a request whose event is already committed. The mirror is
+        // meant to cost visibility and never correctness, which only holds off `sync`.
+        'connection' => env('ROBOT_COUNCIL_SLACK_CONNECTION'),
+
+        // Whether narration is mirrored. Narration is the one kind of event the feed restricts by
+        // reader (#29), and that rule is about what one developer's AGENT may read from another's
+        // -- because event content is untrusted input to something that may have shell access.
+        // A Slack channel is a human surface, so mirroring narration there is the point of having
+        // one, and it does mean everyone with channel access reads every agent's narration. Turn
+        // this off to mirror only state changes and directives.
+        'mirror_restricted' => env('ROBOT_COUNCIL_SLACK_MIRROR_NARRATION', true),
     ],
 
     /*

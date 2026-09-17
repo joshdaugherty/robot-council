@@ -32,20 +32,17 @@ final class FleetFeedController
             'limit' => ['sometimes', 'integer', 'min:1', 'max:'.FleetFeed::MAX_PAGE],
         ]);
 
-        $after = $request->integer('after');
-        $limit = $request->integer('limit', FleetFeed::MAX_PAGE);
+        $page = $feed->after(
+            Principal::agentSession($request),
+            $request->integer('after'),
+            $request->integer('limit', FleetFeed::MAX_PAGE)
+        );
 
-        $events = $feed->after(Principal::agentSession($request), $after, $limit);
-
-        // The last ID returned, so a reader that saw nothing keeps the cursor it came with rather
-        // than resetting to the start of the feed
-        $last = $events === [] ? null : $events[\count($events) - 1]['id'];
-
-        $cursor = \is_int($last) ? $last : $after;
-
+        // The cursor is how far the feed was examined, not the last row returned: a page may be
+        // short or empty because of the visibility rule, and a reader still has to make progress
         return new JsonResponse([
-            'events' => $events,
-            'cursor' => $cursor,
+            'events' => $page['events'],
+            'cursor' => $page['cursor'],
         ]);
     }
 }

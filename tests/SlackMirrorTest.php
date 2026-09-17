@@ -255,8 +255,15 @@ it('bounds a malformed Retry-After rather than trusting it', function (string $h
 ]);
 
 it('reads nothing from Slack', function (): void {
-    // The package's only HTTP call is the one POST in the mirror job. A read of any Slack API
-    // would mean a coordination decision could come to depend on Slack being up and honest.
+    // The expression first, against a fixture it MUST match. Without this the silence below says
+    // nothing: the package writes its own call as `Http::asJson()->post(...)`, so an expression
+    // anchored on `Http::get(` could never have seen a read even if one were added.
+    $readVerb = '/->\s*(get|head|patch|put|delete|send|pool)\s*\(/i';
+
+    expect('Http::withToken(\'x\')->get($url);')->toMatch($readVerb)
+        ->and("Http::asJson()->get('https://slack.com/api/conversations.history');")->toMatch($readVerb)
+        ->and('Http::asJson()->post($url, []);')->not->toMatch($readVerb);
+
     $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__.'/../src'));
 
     $callers = [];
@@ -268,12 +275,109 @@ it('reads nothing from Slack', function (): void {
 
         $source = (string) file_get_contents($file->getPathname());
 
-        if (preg_match('/\bHttp::/', $source) === 1) {
-            $callers[] = $file->getFilename();
+        if (preg_match('/\bHttp::/i', $source) !== 1) {
+            continue;
         }
 
-        expect($source)->not->toMatch('/Http::(get|head|patch|put|delete)\(/');
+        $callers[] = $file->getFilename();
+
+        // Any read verb anywhere in a file that talks HTTP at all, whatever it is chained to
+        expect($source)->not->toMatch($readVerb);
     }
 
+    // Exactly one file talks HTTP, and it issues exactly one call
     expect($callers)->toBe(['MirrorEventToSlack.php']);
+
+    $job = (string) file_get_contents(__DIR__.'/../src/Jobs/MirrorEventToSlack.php');
+
+    expect(preg_match_all('/\bHttp::/i', $job))->toBe(1)
+        ->and($job)->toContain('->post(');
+});
+
+it('queues the mirror only after the transaction commits', function (): void {
+    config()->set('robot-council.slack.webhook_url', WEBHOOK);
+
+    // Observed from INSIDE the open transaction, which is the only place the deferral is visible.
+    // Asserting after the commit cannot tell `afterCommit` from an immediate dispatch, because the
+    // queue writes to `jobs` on this same connection and would roll back with everything else.
+    DB::transaction(function (): void {
+        $this->service(FleetEvents::class)->record(FleetEventType::Narration, null, 'inside');
+
+        expect(DB::table('jobs')->count())->toBe(0, 'the mirror must not be queued before the commit');
+    });
+
+    expect(DB::table('jobs')->count())->toBe(1);
+});
+
+it('treats anything but a 2xx as a refusal, without naming the webhook', function (int $status): void {
+    config()->set('robot-council.slack.webhook_url', WEBHOOK);
+
+    Http::fake([WEBHOOK => Http::response('no', $status)]);
+
+    $installation = $this->approveInstallation($this->developer, [Ability::EventsPost->value]);
+    [$session] = $this->startAgentSession($installation);
+
+    $event = $this->service(FleetEvents::class)->record(FleetEventType::Narration, $session, 'anything');
+
+    $thrown = null;
+
+    try {
+        runTheMirror($this, $event);
+    } catch (RuntimeException $runtimeException) {
+        $thrown = $runtimeException;
+    }
+
+    // A redirect is not a delivery: `failed()` would have read 3xx as success and dropped the
+    // message silently
+    expect($thrown)->toBeInstanceOf(RuntimeException::class)
+        ->and($thrown?->getMessage())->toContain((string) $status)
+        ->and($thrown?->getMessage())->not->toContain(WEBHOOK);
+})->with([
+    'a redirect' => [302],
+    'a client error' => [400],
+    'a server error' => [500],
+]);
+
+it('does not leak a malformed webhook URL either', function (): void {
+    // Guzzle raises `MalformedUriException` for this, which is not a connection failure and would
+    // sail past a catch narrowed to one
+    // The bracket is unclosed, so Guzzle raises `MalformedUriException` while building the URI --
+    // not a connection failure, and not something a catch narrowed to one would see. No fake here
+    // on purpose: a fake intercepts before the URI is parsed, so it would hide the very path this
+    // test exists for, and a URI this broken never reaches the network.
+    config()->set('robot-council.slack.webhook_url', 'https://[hooks.slack.example/secret-path');
+
+    $installation = $this->approveInstallation($this->developer, [Ability::EventsPost->value]);
+    [$session] = $this->startAgentSession($installation);
+
+    $event = $this->service(FleetEvents::class)->record(FleetEventType::Narration, $session, 'anything');
+
+    $thrown = null;
+
+    try {
+        runTheMirror($this, $event);
+    } catch (RuntimeException $runtimeException) {
+        $thrown = $runtimeException;
+    }
+
+    expect($thrown)->toBeInstanceOf(RuntimeException::class)
+        ->and($thrown?->getMessage())->not->toContain('secret-path')
+        ->and($thrown?->getPrevious())->toBeNull();
+});
+
+it('does not mirror narration when a host turns that off', function (): void {
+    config()->set('robot-council.slack.webhook_url', WEBHOOK);
+    config()->set('robot-council.slack.mirror_restricted', false);
+
+    $installation = $this->approveInstallation($this->developer, [Ability::EventsPost->value]);
+    [$session] = $this->startAgentSession($installation);
+
+    $queuedForTheSessionStart = DB::table('jobs')->count();
+
+    // The session start is a state change and was mirrored; the narration is restricted and is not
+    expect($queuedForTheSessionStart)->toBeGreaterThan(0);
+
+    $this->service(FleetEvents::class)->record(FleetEventType::Narration, $session, 'kept off the channel');
+
+    expect(DB::table('jobs')->count())->toBe($queuedForTheSessionStart);
 });

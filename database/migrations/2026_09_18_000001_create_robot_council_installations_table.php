@@ -23,7 +23,10 @@ return new class extends Migration
             // The developer who owns the installation. No foreign key: the host owns its users
             // table, including its name and the type of its key, and a developer whose row has
             // gone is refused on the next request rather than by the database.
-            $table->unsignedBigInteger('user_id')->index();
+            // The host's key as text, not a bigint. A host keyed by UUID or ULID is an ordinary
+            // multi-tenant application, and this table holds one row per developer, so the usual
+            // argument for a narrow integer index has nothing to weigh against here.
+            $table->string('user_id', 64)->index();
 
             // What the requester claimed about itself, shown on the verification page as a claim
             $table->string('harness', 32);
@@ -34,7 +37,7 @@ return new class extends Migration
             $table->json('granted_abilities');
 
             // The developer who approved it, and the address the code was requested from
-            $table->unsignedBigInteger('approved_by')->nullable();
+            $table->string('approved_by', 64)->nullable();
             $table->string('requested_ip', 45)->nullable();
 
             // `dateTime`, not `timestamp`. MySQL and MariaDB with `explicit_defaults_for_timestamp`

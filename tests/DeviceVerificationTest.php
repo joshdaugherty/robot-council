@@ -107,7 +107,7 @@ it('grants what the request asked for, and records who decided', function (): vo
     expect($decided->granted_abilities)->toBe([Ability::TasksClaim->value])
         ->and($decided->approved_at)->not->toBeNull()
         ->and($decided->denied_at)->toBeNull()
-        ->and($decided->decided_by)->toBe($this->developer->getKey());
+        ->and($decided->decided_by)->toBe(keyValue($this->developer->getKey()));
 });
 
 it('grants nothing that was added to the approval itself', function (): void {

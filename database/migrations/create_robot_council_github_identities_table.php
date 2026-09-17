@@ -25,7 +25,10 @@ return new class extends Migration
             // One identity per user, and per GitHub account. No foreign key: the host owns its
             // users table, including its name and the type of its key, and a user that has gone
             // is refused at sign-in rather than by the database.
-            $table->unsignedBigInteger('user_id')->unique();
+            // The host's key as text, not a bigint. A host keyed by UUID or ULID is an ordinary
+            // multi-tenant application, and this table holds one row per developer, so the usual
+            // argument for a narrow integer index has nothing to weigh against here.
+            $table->string('user_id', 64)->unique();
             $table->unsignedBigInteger('github_id')->unique();
 
             // What the account looked like at the last sign-in, for display only

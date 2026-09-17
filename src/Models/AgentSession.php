@@ -33,7 +33,7 @@ use Laravel\Sanctum\PersonalAccessToken;
  *
  * @property int $id
  * @property int $installation_id
- * @property int $user_id
+ * @property string $user_id
  * @property AgentSessionStatus $status
  * @property Carbon|null $last_seen_at
  * @property string|null $project_id
@@ -68,7 +68,6 @@ final class AgentSession extends Model implements AuthenticatableContract
     {
         return [
             'installation_id' => 'integer',
-            'user_id' => 'integer',
             'status' => AgentSessionStatus::class,
             'last_seen_at' => 'datetime',
         ];

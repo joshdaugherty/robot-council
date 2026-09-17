@@ -58,7 +58,7 @@ it('signs in a developer on the access list and records the account', function (
 
     expect($user->name)->toBe('octodev')
         ->and($user->email)->toBe('octo@example.com')
-        ->and($identity->user_id)->toBe($user->id);
+        ->and($identity->user_id)->toBe(keyValue($user->id));
 });
 
 it('refuses an account on neither access list, creating nothing', function (): void {

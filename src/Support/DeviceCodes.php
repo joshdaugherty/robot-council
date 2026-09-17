@@ -126,11 +126,11 @@ final class DeviceCodes
      * Approve a request, granting the abilities the server computed.
      *
      * @param  DeviceCode  $code  The request to approve.
-     * @param  int  $decidedBy  The approving developer's key in the host's users table.
+     * @param  string  $decidedBy  The approving developer's key in the host's users table.
      * @param  list<string>  $granted  The abilities to grant.
      * @return bool True when this call was the one that decided it.
      */
-    public function approve(DeviceCode $code, int $decidedBy, array $granted): bool
+    public function approve(DeviceCode $code, string $decidedBy, array $granted): bool
     {
         return $this->undecided($code)->update([
             'approved_at' => Carbon::now(),
@@ -146,10 +146,10 @@ final class DeviceCodes
      * Deny a request.
      *
      * @param  DeviceCode  $code  The request to deny.
-     * @param  int  $decidedBy  The denying developer's key in the host's users table.
+     * @param  string  $decidedBy  The denying developer's key in the host's users table.
      * @return bool True when this call was the one that decided it.
      */
-    public function deny(DeviceCode $code, int $decidedBy): bool
+    public function deny(DeviceCode $code, string $decidedBy): bool
     {
         return $this->undecided($code)->update([
             'denied_at' => Carbon::now(),

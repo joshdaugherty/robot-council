@@ -48,7 +48,7 @@ return new class extends Migration
             $table->timestamp('denied_at')->nullable();
             $table->timestamp('consumed_at')->nullable();
 
-            $table->unsignedBigInteger('decided_by')->nullable();
+            $table->string('decided_by', 64)->nullable();
 
             $table->timestamps();
         });

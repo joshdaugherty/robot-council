@@ -32,7 +32,11 @@ final class DeviceTokenController
     {
         $request->validate([
             'device_code' => ['required', 'string', 'max:255'],
-            'code_verifier' => ['required', 'string', 'max:255'],
+
+            // RFC 7636 section 4.1 floors the verifier at 43 characters, because the whole of
+            // "a stolen device code is inert" rests on it. A helper is free to send more entropy
+            // than that and none to send less.
+            'code_verifier' => ['required', 'string', 'min:43', 'max:128'],
         ]);
 
         $claimed = $deviceCodes->consume(

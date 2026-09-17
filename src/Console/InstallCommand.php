@@ -12,6 +12,7 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use ReflectionClass;
+use RobotCouncil\Support\Credentials;
 
 /**
  * Performs the setup a host application needs: writes the migrations the package cannot load
@@ -41,19 +42,22 @@ final class InstallCommand extends Command
      * @param  Repository  $config  The host application's configuration repository.
      * @return int The command's exit code.
      */
-    public function handle(Filesystem $files, Repository $config): int
+    public function handle(Filesystem $files, Repository $config, Credentials $credentials): int
     {
+        // Checked before anything is written, so a refusal leaves the application exactly as it
+        // was. Writing two migrations and then exiting non-zero tells a deploy script the install
+        // failed while half of it happened, and the re-run that fixes nothing exits non-zero too.
+        if (! $this->checkSanctumExpiration($config, $credentials)) {
+            return self::FAILURE;
+        }
+
         $migrations = $this->laravel->databasePath('migrations');
 
         $files->ensureDirectoryExists($migrations);
 
         $this->writeUsersMigration($files, $migrations);
 
-        if (! $this->publishSanctumMigration($files, $migrations)) {
-            return self::FAILURE;
-        }
-
-        return $this->reportSanctumExpiration($config);
+        return $this->publishSanctumMigration($files, $migrations) ? self::SUCCESS : self::FAILURE;
     }
 
     /**
@@ -152,24 +156,47 @@ final class InstallCommand extends Command
     }
 
     /**
-     * Report a `sanctum.expiration` that would cut agent credentials off.
+     * Check that `sanctum.expiration` cannot cut an installation credential off early.
      *
-     * Sanctum measures that setting from a token's `created_at`, so a non-null value expires a
-     * renewed session token on the installation's schedule rather than on its own, and the agent
-     * it belongs to stops working with no way to recover but re-enrollment.
+     * Sanctum applies that one setting to every guard on its driver -- `SanctumServiceProvider`
+     * builds each one with `config('sanctum.expiration')` -- and measures it from a token's
+     * `created_at`. Session tokens survive it, because a renewal issues a new row with a new
+     * creation time. An installation credential does not: it is created once and expected to live
+     * for `installation_max_age_days`, so any shorter global setting retires it silently, and the
+     * machine can only come back by enrolling again.
+     *
+     * The requirement is therefore "null, or at least as long as an installation lives" rather
+     * than "null", which leaves a host free to keep an expiry for its own tokens.
      *
      * @param  Repository  $config  The host application's configuration repository.
-     * @return int The command's exit code.
+     * @param  Credentials  $credentials  The configured lifetimes.
+     * @return bool False once the refusal has been reported.
      */
-    private function reportSanctumExpiration(Repository $config): int
+    private function checkSanctumExpiration(Repository $config, Credentials $credentials): bool
     {
-        if ($config->get('sanctum.expiration') === null) {
-            return self::SUCCESS;
+        $expiration = $config->get('sanctum.expiration');
+
+        if ($expiration === null) {
+            return true;
         }
 
-        $this->components->error("Set `sanctum.expiration` to null. Sanctum measures it from a token's creation, so it cuts off renewed robot-council session tokens and the agents holding them, whatever their own expiry says.");
+        $needed = $credentials->installationMaxAgeDays() * 24 * 60;
 
-        return self::FAILURE;
+        $minutes = \is_int($expiration) || (\is_string($expiration) && ctype_digit($expiration))
+            ? (int) $expiration
+            : 0;
+
+        if ($minutes >= $needed) {
+            return true;
+        }
+
+        $this->components->error(sprintf(
+            "Set `sanctum.expiration` to null, or to at least %d minutes. Sanctum measures it from a token's creation and applies it to every guard on its driver, so a shorter value retires robot-council installation credentials before their %d-day life is up, and the machines holding them can only return by enrolling again.",
+            $needed,
+            $credentials->installationMaxAgeDays()
+        ));
+
+        return false;
     }
 
     /**

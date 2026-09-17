@@ -14,7 +14,9 @@ declare(strict_types=1);
 
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\PersonalAccessToken;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Models\AgentSession;
@@ -169,11 +171,10 @@ it('prunes an expired code whether or not it was decided', function (): void {
 
     Artisan::call('robot-council:prune-device-codes');
 
+    // Nothing beyond the fixture: an approval alone creates no installation, because only an
+    // exchange does, and the code expired before one happened
     expect(DeviceCode::query()->count())->toBe(0)
-
-        // The installation the approval would have produced was never created, because nothing
-        // exchanged the code before it expired
-        ->and(Installation::query()->count())->toBe(1);
+        ->and(Installation::query()->whereKeyNot($this->installation->getKey())->count())->toBe(0);
 });
 
 it('schedules the prune', function (): void {
@@ -199,4 +200,45 @@ it('ends a session through the store without touching its installation', functio
 
     // The installation can still start a new session, which is what the process does next
     $this->machine($this->credential)->postJson(route('robot-council.sessions.start'))->assertCreated();
+});
+
+it('cannot be outrun by a session starting at the same moment', function (): void {
+    Artisan::call('robot-council:grant-ability', [
+        'installation' => $this->installation->getKey(),
+        'ability' => Ability::EventsPost->value,
+    ]);
+
+    $fired = false;
+
+    // The revocation lands after the request has already loaded the installation -- the guard
+    // resolves a token's owner before any controller runs -- and before the token is minted. An
+    // implementation that mints from the instance it arrived with issues a token carrying the
+    // ability that was just revoked, and lives with it for the session's whole lifetime, while the
+    // command reports that every live token was rewritten.
+    DB::listen(function (QueryExecuted $query) use (&$fired): void {
+        if ($fired || ! str_contains($query->sql, 'robot_council_installations')) {
+            return;
+        }
+
+        $fired = true;
+
+        Artisan::call('robot-council:revoke-ability', [
+            'installation' => $this->installation->getKey(),
+            'ability' => Ability::EventsPost->value,
+        ]);
+    });
+
+    $started = $this->machine($this->credential)
+        ->postJson(route('robot-council.sessions.start'))
+        ->assertCreated();
+
+    expect($fired)->toBeTrue()
+        ->and($started->json('abilities'))->toBe([Ability::TasksCreate->value]);
+
+    $token = stringValue($started->json('token'));
+
+    $this->machine($token)
+        ->getJson(route('robot-council.agent.session'))
+        ->assertOk()
+        ->assertJson(['abilities' => [Ability::TasksCreate->value]]);
 });

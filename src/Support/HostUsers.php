@@ -8,20 +8,29 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
+use RobotCouncil\Access\Guard;
 use RobotCouncil\Models\GithubIdentity;
 use RuntimeException;
 
 /**
  * Reads and writes the records behind a developer: the host application's user row, and the
  * package's own GitHub identity for it. The package owns no users table, and takes the model from
- * the host's `auth.providers.users.model` configuration.
+ * the provider behind the configured guard.
+ *
+ * The host's users table has to accept a row carrying only `name` and `email`; the install
+ * migration relaxes the two columns Laravel's own skeleton makes NOT NULL. A table with other
+ * NOT NULL columns that have no default needs an extension point this package does not have yet.
  */
 final class HostUsers
 {
     /**
      * @param  Repository  $config  The host application's configuration repository.
+     * @param  Guard  $guard  The configured guard's name.
      */
-    public function __construct(private readonly Repository $config) {}
+    public function __construct(
+        private readonly Repository $config,
+        private readonly Guard $guard
+    ) {}
 
     /**
      * Resolve the host application's user model.
@@ -32,14 +41,33 @@ final class HostUsers
      */
     public function modelClass(): string
     {
-        $model = $this->config->get('auth.providers.users.model');
+        $provider = $this->providerName();
+
+        $model = $this->config->get(sprintf('auth.providers.%s.model', $provider));
 
         // Refuse before any row is read or written, rather than failing after creating a user
         if (! \is_string($model) || ! is_subclass_of($model, Model::class) || ! is_a($model, Authenticatable::class, true)) {
-            throw new RuntimeException('Set `auth.providers.users.model` to an Eloquent model that implements Authenticatable for robot-council.');
+            throw new RuntimeException(sprintf('Set `auth.providers.%s.model` to an Eloquent model that implements Authenticatable for robot-council.', $provider));
         }
 
         return $model;
+    }
+
+    /**
+     * The authentication provider behind the package's configured guard.
+     *
+     * Derived from the guard rather than assumed to be `users`, because the guard is configurable
+     * for exactly this reason: a host with several guards may keep its people under another
+     * provider entirely, and reading one guard while resolving another's model is how a package
+     * ends up creating rows in the wrong table.
+     *
+     * @return string The provider's name in `auth.providers`.
+     */
+    public function providerName(): string
+    {
+        $provider = $this->config->get(sprintf('auth.guards.%s.provider', $this->guard->name()));
+
+        return \is_string($provider) && $provider !== '' ? $provider : 'users';
     }
 
     /**

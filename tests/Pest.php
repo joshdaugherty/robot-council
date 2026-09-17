@@ -24,7 +24,7 @@ pest()->extend(TestCase::class)->in(__DIR__);
 function requestDeviceCode(
     TestCase $case,
     array $requestedAbilities = [],
-    string $verifier = 'a-verifier-only-the-helper-holds',
+    string $verifier = 'a-verifier-only-the-helper-holds-and-nobody-else-at-all',
     array $overrides = []
 ): array {
     $requestedAbilities = $requestedAbilities === []

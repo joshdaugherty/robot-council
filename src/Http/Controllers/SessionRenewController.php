@@ -66,7 +66,7 @@ final class SessionRenewController
         return new JsonResponse([
             'session_id' => $issued->owner->getKey(),
             'token' => $issued->plainTextToken,
-            'abilities' => $installation->abilities(),
+            'abilities' => $issued->abilities,
             'expires_in' => $credentials->sessionTtlMinutes() * 60,
         ], Response::HTTP_OK);
     }

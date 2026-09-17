@@ -36,15 +36,19 @@ final class DeviceCodeController
         $request->validate([
             // Restricted character sets, because both are printed on the verification page, and
             // because they are the only description a developer has of what they are approving
-            'harness' => ['required', 'string', 'regex:/^[a-z0-9-]{1,32}$/'],
-            'machine_label' => ['required', 'string', 'regex:/^[A-Za-z0-9._-]{1,64}$/'],
+            // `/D`, so `$` cannot match before a trailing newline: without it a 32-character
+            // harness plus a newline is 33 bytes into a 32-byte column, which is a 500 from an
+            // unauthenticated endpoint on Postgres and on MySQL in strict mode. The `max:` rules
+            // bound it a second way, in bytes the column can hold.
+            'harness' => ['required', 'string', 'max:32', 'regex:/^[a-z0-9-]{1,32}$/D'],
+            'machine_label' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]{1,64}$/D'],
 
             // `*` and `coordinator:direct` are absent from this list, so neither can be asked for
             'requested_abilities' => ['required', 'array', 'min:1'],
             'requested_abilities.*' => ['string', Rule::in($requestable)],
 
             // The SHA-256 of a verifier only the helper holds, so a stolen device code is inert
-            'code_challenge' => ['required', 'string', 'regex:/^[0-9a-f]{64}$/'],
+            'code_challenge' => ['required', 'string', 'size:64', 'regex:/^[0-9a-f]{64}$/D'],
         ]);
 
         // Read back off the request rather than out of the validator's array, which is typed as

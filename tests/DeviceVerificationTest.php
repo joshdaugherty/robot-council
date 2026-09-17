@@ -22,9 +22,14 @@ beforeEach(function (): void {
 });
 
 it('shows what the request claims, how old it is, and both addresses', function (): void {
-    $enrollment = requestDeviceCode($this);
+    // The two addresses must differ, or one assertion satisfies both rows and deleting either from
+    // the page leaves this green -- and comparing them is the whole reason they are shown
+    $enrollment = requestDeviceCode($this->withServerVariables(['REMOTE_ADDR' => '203.0.113.10']));
 
-    $response = $this->actingAs($this->developer, 'web')
+    $this->travelTo(now()->addSeconds(42));
+
+    $response = $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.7'])
+        ->actingAs($this->developer, 'web')
         ->get(route('robot-council.enroll.show', ['user_code' => $enrollment['record']->user_code]));
 
     $response->assertOk()
@@ -32,7 +37,14 @@ it('shows what the request claims, how old it is, and both addresses', function 
         ->assertSee('claude-code')
         ->assertSee('workbench-01')
         ->assertSee('tasks:create')->assertSee('events:post')->assertSeeHtml('claims, not facts')
-        ->assertSee('seconds ago')->assertSee('127.0.0.1')->assertSeeHtml('This code is displayed on a machine I control');
+
+        // The age as a number, not as the words around it
+        ->assertSee('42 seconds ago')
+
+        // Both rows, each with its label, and each address only one of them can supply
+        ->assertSee('Requested from')->assertSee('203.0.113.10')
+        ->assertSee('You are at')->assertSee('198.51.100.7')
+        ->assertSeeHtml('This code is displayed on a machine I control');
 
     // The page can show the user code; it must never show what the helper polls with
     expect($response->getContent())->not->toContain($enrollment['device_code'])
@@ -143,6 +155,7 @@ it('refuses a second decision on the same request', function (string $first, str
     'approve then approve' => ['robot-council.enroll.approve', 'robot-council.enroll.approve'],
     'approve then deny' => ['robot-council.enroll.approve', 'robot-council.enroll.deny'],
     'deny then approve' => ['robot-council.enroll.deny', 'robot-council.enroll.approve'],
+    'deny then deny' => ['robot-council.enroll.deny', 'robot-council.enroll.deny'],
 ]);
 
 it('refuses an approval once the code has expired', function (): void {
@@ -215,4 +228,67 @@ it('keeps requests apart when two are in flight', function (): void {
     expect($second['record']->refresh()->granted_abilities)->toBe([Ability::LocksAcquire->value])
         ->and($first['record']->refresh()->isDecided())->toBeFalse()
         ->and(DeviceCode::query()->count())->toBe(2);
+});
+
+it('escapes what the requester supplied, whatever reached the row', function (): void {
+    $enrollment = requestDeviceCode($this);
+
+    // Written past the endpoint's validation on purpose: the page's escaping is its own guarantee,
+    // and a later caller, a seeder, or a relaxed rule must not be able to turn it into markup
+    $enrollment['record']->forceFill([
+        'machine_label' => '<script>alert(1)</script>',
+        'harness' => '"><img src=x onerror=alert(1)>',
+    ])->save();
+
+    $response = $this->actingAs($this->developer, 'web')
+        ->get(route('robot-council.enroll.show', ['user_code' => $enrollment['record']->user_code]));
+
+    $response->assertOk()->assertSee('<script>alert(1)</script>');
+
+    // What matters is that no tag opens: Blade escapes the angle brackets and the quote, which is
+    // what makes the payload inert, while leaving harmless characters like `=` alone
+    expect($response->getContent())
+        ->not->toContain('<script>alert(1)</script>')
+        ->not->toContain('<img src=x')
+        ->toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+        ->toContain('&lt;img src=x onerror=alert(1)&gt;');
+});
+
+it('does not look up a code that is not the right length', function (string $typed): void {
+    $enrollment = requestDeviceCode($this);
+
+    // A prefix of a live code must not resolve to it, and neither must an overlong reading
+    $this->actingAs($this->developer, 'web')
+        ->get(route('robot-council.enroll.show', ['user_code' => $typed]))
+        ->assertOk()
+        ->assertDontSee('Approve this machine')
+        ->assertSee('No enrollment is waiting on that code');
+
+    expect($enrollment['record']->refresh()->isDecided())->toBeFalse();
+})->with([
+    'too short' => ['BCDFGH'],
+    'too long' => ['BCDFGHJKL'],
+    'punctuation only' => ['----'],
+]);
+
+it('limits one developer without limiting another', function (): void {
+    config()->set('robot-council.rate_limits.verification_per_user', 2);
+
+    $second = $this->enrollDeveloper(77, login: 'otherdev');
+    $this->setAccessLists(developers: [4242, 77]);
+
+    for ($attempt = 0; $attempt < 2; $attempt++) {
+        $this->actingAs($this->developer, 'web')
+            ->post(route('robot-council.enroll.deny'), ['user_code' => 'BCDFGHJK'])
+            ->assertNotFound();
+    }
+
+    $this->actingAs($this->developer, 'web')
+        ->post(route('robot-council.enroll.deny'), ['user_code' => 'BCDFGHJK'])
+        ->assertStatus(429);
+
+    // Keyed on the developer, so the second one still has their whole allowance
+    $this->actingAs($second, 'web')
+        ->post(route('robot-council.enroll.deny'), ['user_code' => 'BCDFGHJK'])
+        ->assertNotFound();
 });

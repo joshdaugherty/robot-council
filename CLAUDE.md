@@ -34,6 +34,12 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
 ## Things that are easy to get wrong
 
 - **Every API must exist in the lowest supported Laravel version.** `composer.json` admits Laravel `^13.23.0` (`illuminate/contracts`), but the development install resolves the newest. The floor is the lowest release CI can test: its `prefer-lowest` cells resolve `laravel/framework` v13.23.0, because `orchestra/testbench ^11.2.0` requires it. Move the constraint whenever that tested floor moves, for example after raising the Testbench constraint.
+- **The local suite and CI run on different cache stores, and nothing records it.** A local
+  checkout may have `vendor/orchestra/testbench-core/laravel/.env` with `CACHE_STORE=database`,
+  copied there by a `vendor/bin/testbench` run; a fresh CI install has no `.env`, so `cache.default`
+  falls back to `array`. Rate limiting is the visible difference: on a database store the limiter
+  issues a dozen queries before the route's own first query, which changes where a `DB::listen`
+  injection lands. Name the store alongside any result that depends on query order.
 - **`composer.lock` is gitignored.** Every CI run and every fresh install resolves dependencies anew, so an unchanged branch can go red later. Compare resolved versions before blaming a diff (see `measurement-parity`).
 - **CI is one workflow with one required check.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to `main`, with no path filters:
   - `tests` runs `vendor/bin/pest --ci` on ubuntu and windows × PHP 8.5 and 8.4 × Laravel 13 × `prefer-lowest` and `prefer-stable`, with `fail-fast: false`, on Pest 5 and PHPUnit 13.
@@ -51,6 +57,15 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
 - **`laravel/socialite` caps Guzzle at 7 for host applications.** Socialite v5.31.0 requires `league/oauth1-client ^1.11`, which allows only Guzzle 6 or 7, while Laravel 13 allows `^7.8.2 || ^8.0`. Installing this package therefore resolves Guzzle 7 in the host application, until Socialite allows `league/oauth1-client` 2.x.
 - **Tests boot Socialite's provider by hand.** A host application discovers it through Composer, while Testbench registers only what `tests/TestCase.php` lists.
 - **The repository belongs to the `robot-council` GitHub organization**, which enables the `Task`, `Bug`, and `Feature` issue types. It moved from `joshdaugherty/robot-council` on 2026-09-17, and old URLs redirect, so links in earlier issues, pull requests, and the `v0.1.0` release still resolve.
+- **The package registers morph aliases for its token owners.** `robot-council-installation` and
+  `robot-council-agent-session`, merged into `Relation::morphMap()` at register time. Without them a
+  host that calls `Relation::enforceMorphMap()` cannot issue any credential, because `getMorphClass()`
+  throws for a model outside the map; and the names are the package's own so that a host adding these
+  classes to its map later cannot change what `tokenable_type` holds and orphan live tokens. A test
+  asserting `tokenable_type` must use the alias, not the class name.
+- **A service provider must not throw.** It runs for every request and every artisan command,
+  including the `config:clear` that would fix a mistyped value, so `registerRoutes()` logs a warning
+  and falls back to the documented default instead.
 - **Never disclose an exploitable vulnerability in a public issue or PR.** Use a draft security advisory, per the `security-audit` skill.
 
 ## Where the conventions live

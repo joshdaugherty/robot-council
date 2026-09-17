@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace RobotCouncil\Access;
 
+use Illuminate\Database\Eloquent\Model;
 use Laravel\Sanctum\Contracts\HasAbilities;
-use Laravel\Sanctum\PersonalAccessToken;
+use Laravel\Sanctum\TransientToken;
 
 /**
  * What a principal's current token is, and what it may do.
@@ -17,6 +18,11 @@ use Laravel\Sanctum\PersonalAccessToken;
  * analysis reads the generic default and concludes a stored token is the only possibility, so a
  * check written against that type reads as dead code while being the one thing standing between a
  * browser session and an agent's abilities. Taking the interface keeps the check honest to both.
+ *
+ * What counts as stored is "not the transient one", never "an instance of Sanctum's own model". A
+ * host may call `Sanctum::usePersonalAccessTokenModel()` with any class implementing `HasAbilities`,
+ * and testing for Sanctum's class would refuse that host's perfectly valid tokens on every request,
+ * with a bare 401 and nothing to read.
  */
 final class Tokens
 {
@@ -28,7 +34,7 @@ final class Tokens
      */
     public static function isStored(?HasAbilities $token): bool
     {
-        return $token instanceof PersonalAccessToken;
+        return $token instanceof HasAbilities && ! $token instanceof TransientToken;
     }
 
     /**
@@ -40,7 +46,7 @@ final class Tokens
      */
     public static function allows(?HasAbilities $token, Ability $ability): bool
     {
-        return $token instanceof PersonalAccessToken && $token->can($ability->value);
+        return $token instanceof HasAbilities && ! $token instanceof TransientToken && $token->can($ability->value);
     }
 
     /**
@@ -66,11 +72,14 @@ final class Tokens
      */
     public static function abilities(?HasAbilities $token): array
     {
-        if (! $token instanceof PersonalAccessToken) {
+        // A stored token is an Eloquent row whatever model a host configured, and the transient
+        // one a browser session carries is not a model at all, so this is the same question
+        // `isStored()` asks, in the form that also gives access to the column
+        if (! $token instanceof Model) {
             return [];
         }
 
-        $abilities = $token->abilities;
+        $abilities = $token->getAttribute('abilities');
 
         if (! \is_array($abilities)) {
             return [];

@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace RobotCouncil\Support;
 
-use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use RobotCouncil\Models\DeviceCode;
+use RobotCouncil\Support\Contracts\DrawsUserCodes;
 use RuntimeException;
 
 /**
@@ -22,49 +22,19 @@ use RuntimeException;
 final class DeviceCodes
 {
     /**
-     * The alphabet a user code is drawn from, per RFC 8628 section 6.1: capital letters with the
-     * vowels and the characters that look like digits removed, so nothing a developer reads off
-     * one screen can be mistyped into another as something else.
-     */
-    public const string USER_CODE_ALPHABET = 'BCDFGHJKLMNPQRSTVWXZ';
-
-    /**
-     * How many characters a user code carries.
-     */
-    public const int USER_CODE_LENGTH = 8;
-
-    /**
      * How many times to redraw a user code that collides with a live one before giving up, so a
      * saturated alphabet fails loudly instead of looping.
      */
     private const int USER_CODE_ATTEMPTS = 12;
 
     /**
-     * What to draw a user code with, when something other than the generator below should.
-     *
-     * The seam exists so a test can prove the collision loop gives up rather than spinning: no
-     * fixture can saturate an alphabet of twenty to the eighth power, so the only way to reach the
-     * bound is to hand the generator a value that always collides. It affects the user code alone,
-     * which lives for minutes and is worthless without the device code and the verifier.
-     *
-     * @var Closure(): string|null
-     */
-    private static ?Closure $userCodeFactory = null;
-
-    /**
      * @param  Credentials  $credentials  The configured lifetimes.
+     * @param  DrawsUserCodes  $userCodes  What draws the code a developer reads and types.
      */
-    public function __construct(private readonly Credentials $credentials) {}
-
-    /**
-     * Draw user codes with the given callback, or with the real generator again when given null.
-     *
-     * @param  (Closure(): string)|null  $factory  What to draw with, or null to restore the default.
-     */
-    public static function drawUserCodesUsing(?Closure $factory): void
-    {
-        self::$userCodeFactory = $factory;
-    }
+    public function __construct(
+        private readonly Credentials $credentials,
+        private readonly DrawsUserCodes $userCodes
+    ) {}
 
     /**
      * The SHA-256 of a value, as the table stores it.
@@ -140,12 +110,15 @@ final class DeviceCodes
     {
         $userCode = self::normalizeUserCode($input);
 
-        if (\strlen($userCode) !== self::USER_CODE_LENGTH) {
+        if (\strlen($userCode) !== UserCodes::LENGTH) {
             return null;
         }
 
-        // Newest first: a user code is unique among live requests, and an expired one is
-        // unreachable, so this is only a tie-break that cannot happen
+        // Newest first. Drawing checks for a live collision before inserting, which is a read
+        // followed by a write and so not atomic: two requests drawing the same code in the same
+        // instant both succeed, at a probability of one in twenty to the eighth per pair. The
+        // column carries an index rather than a unique constraint, because a code may be redrawn
+        // once an earlier one has expired and been pruned.
         return $this->live()->where('user_code', $userCode)->latest('id')->first();
     }
 
@@ -279,7 +252,7 @@ final class DeviceCodes
     private function freshUserCode(): string
     {
         for ($attempt = 0; $attempt < self::USER_CODE_ATTEMPTS; $attempt++) {
-            $candidate = $this->randomUserCode();
+            $candidate = $this->userCodes->draw();
 
             if (! $this->live()->where('user_code', $candidate)->exists()) {
                 return $candidate;
@@ -287,27 +260,5 @@ final class DeviceCodes
         }
 
         throw new RuntimeException(sprintf('robot-council could not draw an unused user code in %d attempts.', self::USER_CODE_ATTEMPTS));
-    }
-
-    /**
-     * Draw a user code, without regard to what is already stored.
-     *
-     * @return string An eight-character code from the RFC 8628 alphabet.
-     */
-    private function randomUserCode(): string
-    {
-        if (self::$userCodeFactory instanceof Closure) {
-            return (self::$userCodeFactory)();
-        }
-
-        $highest = \strlen(self::USER_CODE_ALPHABET) - 1;
-
-        $code = '';
-
-        for ($position = 0; $position < self::USER_CODE_LENGTH; $position++) {
-            $code .= self::USER_CODE_ALPHABET[random_int(0, $highest)];
-        }
-
-        return $code;
     }
 }

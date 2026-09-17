@@ -60,7 +60,7 @@ final class Installations
                 $installation->expires_at
             );
 
-            return new IssuedCredential($installation, $token->plainTextToken);
+            return new IssuedCredential($installation, $token->plainTextToken, [Ability::SessionsStart->value]);
         });
     }
 
@@ -103,6 +103,13 @@ final class Installations
     public function setAbility(Installation $installation, Ability $ability, bool $granted): int
     {
         return DB::transaction(function () use ($installation, $ability, $granted): int {
+            // Held for the length of the transaction, so a session starting concurrently waits
+            // rather than minting a token from the abilities as they were a moment ago
+            $installation = Installation::query()
+                ->whereKey($installation->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
             $abilities = $installation->abilities();
 
             $abilities = $granted
@@ -133,6 +140,6 @@ final class Installations
      */
     private function sessionsOf(Installation $installation): Collection
     {
-        return AgentSession::query()->where('installation_id', $installation->getKey())->get();
+        return $installation->sessions()->get();
     }
 }

@@ -38,7 +38,11 @@ Route::post('device/token', DeviceTokenController::class)
 Route::middleware([EnsureInstallation::class, 'throttle:'.RobotCouncilServiceProvider::SESSIONS_LIMITER])
     ->group(function (): void {
         Route::post('sessions', SessionStartController::class)->name('sessions.start');
-        Route::post('sessions/{session}/renew', SessionRenewController::class)->name('sessions.renew');
+        // Constrained, so a non-numeric id is a 404 rather than a 500: Postgres raises
+        // `22P02 invalid input syntax for type bigint` where SQLite quietly matches no rows
+        Route::post('sessions/{session}/renew', SessionRenewController::class)
+            ->whereNumber('session')
+            ->name('sessions.renew');
     });
 
 Route::middleware(EnsureAgentSession::class)->group(function (): void {

@@ -20,6 +20,7 @@ use RobotCouncil\Access\Ability;
 use RobotCouncil\Http\Middleware\EnsureAllowlistedDeveloper;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\Installation;
+use RobotCouncil\Tests\Fixtures\HostUserWithTokens;
 
 beforeEach(function (): void {
     $this->migrateUsersTableWithPackageColumns();
@@ -52,7 +53,7 @@ it("starts a session carrying the installation's abilities", function (): void {
         ->and($session->hasGone())->toBeFalse();
 
     // The session's token expires on the session's schedule, not the installation's
-    $token = PersonalAccessToken::query()->where('tokenable_type', AgentSession::class)->sole();
+    $token = PersonalAccessToken::query()->where('tokenable_type', (new AgentSession)->getMorphClass())->sole();
 
     expect($token->abilities)->toBe([Ability::TasksCreate->value, Ability::EventsPost->value])
         ->and($token->expires_at?->timestamp)->toBe(now()->addMinutes(60)->timestamp);
@@ -88,7 +89,7 @@ it("replaces a session's token on renewal, and refuses the one it replaced", fun
 
     $this->machine($first)->getJson(route('robot-council.agent.session'))->assertUnauthorized();
 
-    expect(PersonalAccessToken::query()->where('tokenable_type', AgentSession::class)->count())->toBe(1);
+    expect(PersonalAccessToken::query()->where('tokenable_type', (new AgentSession)->getMorphClass())->count())->toBe(1);
 });
 
 it('refuses to renew a session that has gone', function (): void {
@@ -307,4 +308,73 @@ it("keeps sessions apart: one installation cannot read another's", function (): 
 
     expect($mine->installation_id)->not->toBe($theirs->installation_id)
         ->and(Installation::query()->count())->toBe(2);
+});
+
+it('refuses an installation credential that does not carry sessions:start', function (string $route): void {
+    // A credential narrowed by anything -- an admin, a future revocation path, a hand-written row.
+    // Without the ability check the session endpoints would admit any stored installation token.
+    $narrowed = $this->installation->createToken('narrowed', [Ability::TasksCreate->value])->plainTextToken;
+
+    $this->machine($narrowed)->postJson(route($route, ['session' => 1]))->assertUnauthorized();
+
+    expect(AgentSession::query()->count())->toBe(0);
+})->with([
+    'starting a session' => ['robot-council.sessions.start'],
+    'renewing one' => ['robot-council.sessions.renew'],
+]);
+
+it('refuses a revoked installation whose tokens are somehow still there', function (): void {
+    [, $sessionToken] = $this->startAgentSession($this->installation);
+
+    // Revoked without deleting anything, so the refusal can only come from the row being re-read
+    // on the request rather than from the token having gone
+    $this->installation->forceFill(['revoked_at' => now()])->save();
+
+    expect(PersonalAccessToken::query()->count())->toBe(2);
+
+    $this->machine($this->credential)->postJson(route('robot-council.sessions.start'))->assertUnauthorized();
+    $this->machine($sessionToken)->getJson(route('robot-council.agent.session'))->assertUnauthorized();
+
+    // And the installation is nowhere near its expiry, so that is not what fired
+    expect($this->installation->expires_at->isFuture())->toBeTrue();
+});
+
+it('refuses a signed-in human whose own user model issues API tokens', function (string $route, string $method): void {
+    // The configuration a host running Sanctum for its own API has, and the only one in which
+    // Sanctum hands the human a transient token whose `can()` answers true to everything
+    config()->set('auth.providers.users.model', HostUserWithTokens::class);
+
+    $human = HostUserWithTokens::query()->whereKey($this->developer->getKey())->firstOrFail();
+
+    $this->actingAs($human, 'web')->json($method, route($route, ['session' => 1]))->assertUnauthorized();
+
+    expect(AgentSession::query()->count())->toBe(0);
+})->with([
+    'starting a session' => ['robot-council.sessions.start', 'POST'],
+    'renewing one' => ['robot-council.sessions.renew', 'POST'],
+    'an agent route' => ['robot-council.agent.session', 'GET'],
+]);
+
+it('rate limits renewals as well as starts, per installation', function (): void {
+    config()->set('robot-council.rate_limits.sessions_per_installation', 3);
+
+    [$session] = $this->startAgentSession($this->installation);
+
+    for ($renewal = 0; $renewal < 3; $renewal++) {
+        $this->machine($this->credential)
+            ->postJson(route('robot-council.sessions.renew', ['session' => $session->getKey()]))
+            ->assertOk();
+    }
+
+    $this->machine($this->credential)
+        ->postJson(route('robot-council.sessions.renew', ['session' => $session->getKey()]))
+        ->assertStatus(429);
+});
+
+it('answers 404 rather than a database error for a session id that is not a number', function (): void {
+    // SQLite quietly matches no rows here; Postgres raises `22P02 invalid input syntax for bigint`,
+    // so without the route constraint this is a 500 on the database CI actually runs
+    $this->machine($this->credential)
+        ->postJson(route('robot-council.sessions.renew', ['session' => 'not-a-number']))
+        ->assertNotFound();
 });

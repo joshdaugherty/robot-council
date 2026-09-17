@@ -40,7 +40,10 @@ return new class extends Migration
 
             // Every decision is a conditional update over these four columns, so a second
             // decision and a second exchange both match no rows
-            $table->timestamp('expires_at')->index();
+            // `dateTime` for the reason the installations migration records: as a NOT NULL
+            // TIMESTAMP this column would be reset to now by the approval's own UPDATE on
+            // MySQL and MariaDB, and the approved code could then never be exchanged.
+            $table->dateTime('expires_at')->index();
             $table->timestamp('approved_at')->nullable();
             $table->timestamp('denied_at')->nullable();
             $table->timestamp('consumed_at')->nullable();

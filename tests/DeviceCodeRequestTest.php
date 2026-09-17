@@ -9,11 +9,15 @@ declare(strict_types=1);
  * @command  vendor/bin/pest --compact tests/DeviceCodeRequestTest.php
  */
 
+use Illuminate\Foundation\Http\Middleware\TrimStrings;
 use Illuminate\Support\Facades\DB;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Models\DeviceCode;
+use RobotCouncil\Support\Contracts\DrawsUserCodes;
 use RobotCouncil\Support\Credentials;
 use RobotCouncil\Support\DeviceCodes;
+use RobotCouncil\Support\UserCodes;
+use RobotCouncil\Tests\Fixtures\AlwaysDrawsUserCode;
 
 /**
  * A well-formed request body, with whatever the test is varying overridden.
@@ -27,17 +31,13 @@ function codeRequest(array $overrides = []): array
         'harness' => 'claude-code',
         'machine_label' => 'workbench-01',
         'requested_abilities' => [Ability::TasksCreate->value, Ability::EventsPost->value],
-        'code_challenge' => hash('sha256', 'a-verifier-only-the-helper-holds'),
+        'code_challenge' => hash('sha256', 'a-verifier-only-the-helper-holds-and-nobody-else-at-all'),
         ...$overrides,
     ];
 }
 
 beforeEach(function (): void {
     $this->migrateUsersTableWithPackageColumns();
-});
-
-afterEach(function (): void {
-    DeviceCodes::drawUserCodesUsing(null);
 });
 
 it('returns what the helper needs, and stores only hashes', function (): void {
@@ -58,7 +58,7 @@ it('returns what the helper needs, and stores only hashes', function (): void {
     $stored = DeviceCode::query()->sole();
 
     expect($stored->device_code_hash)->toBe(hash('sha256', $deviceCode))
-        ->and($stored->challenge_hash)->toBe(hash('sha256', hash('sha256', 'a-verifier-only-the-helper-holds')))
+        ->and($stored->challenge_hash)->toBe(hash('sha256', hash('sha256', 'a-verifier-only-the-helper-holds-and-nobody-else-at-all')))
         ->and($stored->requested_abilities)->toBe(['tasks:create', 'events:post'])
         ->and($stored->granted_abilities)->toBeNull();
 
@@ -67,7 +67,7 @@ it('returns what the helper needs, and stores only hashes', function (): void {
 
     expect(implode('|', array_map(static fn (mixed $value): string => \is_scalar($value) ? (string) $value : '', $row)))
         ->not->toContain($deviceCode)
-        ->not->toContain('a-verifier-only-the-helper-holds');
+        ->not->toContain('a-verifier-only-the-helper-holds-and-nobody-else-at-all');
 });
 
 it('draws a user code of eight characters from the RFC 8628 alphabet', function (): void {
@@ -83,11 +83,11 @@ it('draws a user code of eight characters from the RFC 8628 alphabet', function 
 
     foreach ($codes as $code) {
         expect($code)->toHaveLength(8)
-            ->and($code)->toMatch('/^['.DeviceCodes::USER_CODE_ALPHABET.']{8}$/');
+            ->and($code)->toMatch('/^['.UserCodes::ALPHABET.']{8}$/D');
     }
 
     // The alphabet excludes the vowels and everything a digit can be read as
-    expect(DeviceCodes::USER_CODE_ALPHABET)->toBe('BCDFGHJKLMNPQRSTVWXZ')
+    expect(UserCodes::ALPHABET)->toBe('BCDFGHJKLMNPQRSTVWXZ')
         ->and(array_unique($codes))->toHaveCount(12);
 });
 
@@ -97,7 +97,7 @@ it('gives up rather than spinning when every drawn user code collides', function
     $taken = DeviceCode::query()->sole()->user_code;
 
     // Every draw now returns a code that is already live
-    DeviceCodes::drawUserCodesUsing(fn (): string => $taken);
+    $this->container()->bind(DrawsUserCodes::class, fn (): DrawsUserCodes => new AlwaysDrawsUserCode($taken));
 
     expect(fn () => $this->service(DeviceCodes::class)->issue(['tasks:create'], 'claude-code', 'workbench', hash('sha256', 'v'), null))
         ->toThrow(RuntimeException::class)
@@ -169,3 +169,39 @@ it("builds the verification URL from the application, not from the requester's h
 
     expect($response->json('verification_uri'))->toBe('https://council.example.com/robot-council/enroll');
 });
+
+it('rate limits one address asking for codes', function (): void {
+    config()->set('robot-council.rate_limits.device_code_per_ip', 3);
+
+    for ($request = 0; $request < 3; $request++) {
+        $this->postJson(route('robot-council.device.code'), codeRequest())->assertCreated();
+    }
+
+    $this->postJson(route('robot-council.device.code'), codeRequest())->assertStatus(429);
+
+    // A different address is unaffected, which is what keying on the address means
+    $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.10'])
+        ->postJson(route('robot-council.device.code'), codeRequest())
+        ->assertCreated();
+});
+
+it('refuses a value that only fits because the pattern stopped at a newline', function (string $field, string $value): void {
+    // PHP's `$` matches before a trailing newline unless the pattern carries `/D`, so this is one
+    // byte past a column the database will not stretch.
+    //
+    // The host's global `TrimStrings` is taken out of the way deliberately. With it, the newline
+    // never reaches the rule and this passes whether or not the pattern is anchored -- so the test
+    // would be measuring a middleware the package does not ship and a host may reorder or remove,
+    // rather than the package's own guarantee.
+    $this->withoutMiddleware(TrimStrings::class)
+        ->postJson(route('robot-council.device.code'), codeRequest([$field => $value]))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors($field);
+
+    expect(DeviceCode::query()->count())->toBe(0);
+})->with([
+    'a full-length harness' => ['harness', str_repeat('a', 32)."\n"],
+    'a short harness' => ['harness', "claude-code\n"],
+    'a full-length label' => ['machine_label', str_repeat('m', 64)."\n"],
+    'a challenge' => ['code_challenge', hash('sha256', 'v')."\n"],
+]);

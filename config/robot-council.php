@@ -55,7 +55,14 @@ return [
         'web_prefix' => env('ROBOT_COUNCIL_WEB_PREFIX', 'robot-council'),
         'web_middleware' => ['web'],
         'api_prefix' => env('ROBOT_COUNCIL_API_PREFIX', 'robot-council/api'),
-        'api_middleware' => ['api'],
+
+        // Deliberately not `['api']`. These endpoints are stateless and bring their own
+        // throttling, and an application's `api` group is not: `statefulApi()` prepends Sanctum's
+        // `EnsureFrontendRequestsAreStateful`, which promotes a request whose origin is on
+        // `sanctum.stateful` into a session request and answers the unauthenticated device
+        // endpoints with 419, while `throttleApi()` re-keys them on the caller's address. Add this
+        // application's own middleware here if it needs to run.
+        'api_middleware' => [],
     ],
 
     /*
@@ -84,6 +91,21 @@ return [
 
         // What the enrollment helper is told to wait between polls.
         'device_code_interval_seconds' => (int) env('ROBOT_COUNCIL_DEVICE_CODE_INTERVAL_SECONDS', 5),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Schedule
+    |--------------------------------------------------------------------------
+    |
+    | Whether the package adds its hourly prune of expired device codes to this
+    | application's schedule. Turn it off to run `robot-council:prune-device-codes`
+    | on another schedule, or from something other than Laravel's scheduler.
+    |
+    */
+
+    'schedule' => [
+        'prune_device_codes' => true,
     ],
 
     /*

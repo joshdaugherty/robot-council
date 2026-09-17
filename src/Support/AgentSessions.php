@@ -39,18 +39,22 @@ final class AgentSessions
     public function start(Installation $installation, ?string $projectId): IssuedCredential
     {
         return DB::transaction(function () use ($installation, $projectId): IssuedCredential {
+            $current = $this->locked($installation);
+
+            $abilities = $current->abilities();
+
             $session = AgentSession::query()->create([
                 'installation_id' => $installation->getKey(),
 
                 // Copied from the installation rather than taken from the request, so a process
                 // cannot start a session belonging to another developer
-                'user_id' => $installation->user_id,
+                'user_id' => $current->user_id,
                 'status' => AgentSessionStatus::Active,
                 'last_seen_at' => Carbon::now(),
                 'project_id' => $projectId,
             ]);
 
-            return new IssuedCredential($session, $this->issueToken($session, $installation));
+            return new IssuedCredential($session, $this->issueToken($session, $abilities), $abilities);
         });
     }
 
@@ -64,13 +68,17 @@ final class AgentSessions
     public function renew(Installation $installation, AgentSession $session): IssuedCredential
     {
         return DB::transaction(function () use ($installation, $session): IssuedCredential {
+            $current = $this->locked($installation);
+
+            $abilities = $current->abilities();
+
             // Delete first: a renewal that failed afterwards leaves a session with no token,
             // which the helper recovers from by starting a new session
             $session->tokens()->delete();
 
             $session->forceFill(['last_seen_at' => Carbon::now()])->save();
 
-            return new IssuedCredential($session, $this->issueToken($session, $installation));
+            return new IssuedCredential($session, $this->issueToken($session, $abilities), $abilities);
         });
     }
 
@@ -94,20 +102,40 @@ final class AgentSessions
     }
 
     /**
-     * Issue one session token carrying the installation's abilities as they stand now.
+     * Re-read the installation inside the transaction, holding its row.
      *
-     * Read from the installation on every issue rather than copied at enrollment, so an ability an
-     * admin revoked is gone from the next token even though the row was written weeks ago.
+     * The instance a request arrives with was loaded by the guard before any of this ran, so its
+     * abilities are whatever they were then. Without the lock, an admin revoking an ability can
+     * commit between that load and this insert: the revoking command's own loop sees no session to
+     * rewrite, the new token is minted from the stale attributes, and the operator is told the
+     * revocation touched every live token while one carrying the revoked ability has just been
+     * issued for the next hour.
+     *
+     * @param  Installation  $installation  The installation the request authenticated as.
+     * @return Installation The row as it stands now, held until the transaction ends.
+     */
+    private function locked(Installation $installation): Installation
+    {
+        $current = Installation::query()->whereKey($installation->getKey())->lockForUpdate()->first();
+
+        return $current instanceof Installation ? $current : $installation;
+    }
+
+    /**
+     * Issue one session token.
+     *
+     * The abilities are read from the installation on every issue rather than copied at enrollment,
+     * so one an admin revoked is gone from the next token even though the row was written weeks ago.
      *
      * @param  AgentSession  $session  The session the token authenticates as.
-     * @param  Installation  $installation  The installation whose abilities the token carries.
+     * @param  list<string>  $abilities  The abilities to mint it with.
      * @return string The plaintext token.
      */
-    private function issueToken(AgentSession $session, Installation $installation): string
+    private function issueToken(AgentSession $session, array $abilities): string
     {
         return $session->createToken(
             self::TOKEN_NAME,
-            $installation->abilities(),
+            $abilities,
             $this->credentials->sessionTokenExpiry()
         )->plainTextToken;
     }

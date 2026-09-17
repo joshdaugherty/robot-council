@@ -40,7 +40,9 @@ final class SessionStartController
         return new JsonResponse([
             'session_id' => $issued->owner->getKey(),
             'token' => $issued->plainTextToken,
-            'abilities' => $installation->abilities(),
+            // What the token actually carries, not what the installation looked like when the
+            // request arrived: an admin may have narrowed it in between
+            'abilities' => $issued->abilities,
 
             // A duration rather than an instant, so a helper on a machine whose clock is off still
             // renews in time

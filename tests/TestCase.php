@@ -312,6 +312,24 @@ class TestCase extends Orchestra
     }
 
     /**
+     * The booted application.
+     *
+     * @return Application The container, which is only null before a test boots one.
+     *
+     * @throws RuntimeException When the application has not booted.
+     */
+    protected function container(): Application
+    {
+        $app = $this->app;
+
+        if ($app === null) {
+            throw new RuntimeException('The application was not booted.');
+        }
+
+        return $app;
+    }
+
+    /**
      * Resolve a service out of the booted application.
      *
      * @template TService of object
@@ -323,13 +341,7 @@ class TestCase extends Orchestra
      */
     protected function service(string $abstract): object
     {
-        $app = $this->app;
-
-        if ($app === null) {
-            throw new RuntimeException('The application was not booted.');
-        }
-
-        $service = $app->make($abstract);
+        $service = $this->container()->make($abstract);
 
         if (! $service instanceof $abstract) {
             throw new RuntimeException(sprintf('The container returned something other than %s.', $abstract));

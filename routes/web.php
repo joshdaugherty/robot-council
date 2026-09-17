@@ -16,13 +16,14 @@ use RobotCouncil\Http\Controllers\EnrollmentDecisionController;
 use RobotCouncil\Http\Controllers\EnrollmentPageController;
 use RobotCouncil\Http\Controllers\GitHubCallbackController;
 use RobotCouncil\Http\Controllers\GitHubRedirectController;
+use RobotCouncil\Http\Middleware\DenyFraming;
 use RobotCouncil\Http\Middleware\EnsureAllowlistedDeveloper;
 use RobotCouncil\RobotCouncilServiceProvider;
 
 Route::get('auth/github/redirect', GitHubRedirectController::class)->name('auth.redirect');
 Route::get('auth/github/callback', GitHubCallbackController::class)->name('auth.callback');
 
-Route::middleware(EnsureAllowlistedDeveloper::class)->group(function (): void {
+Route::middleware([EnsureAllowlistedDeveloper::class, DenyFraming::class])->group(function (): void {
     Route::get('enroll', EnrollmentPageController::class)->name('enroll.show');
 
     Route::middleware('throttle:'.RobotCouncilServiceProvider::VERIFICATION_LIMITER)->group(function (): void {

@@ -88,12 +88,14 @@ it('writes no credential, device code, or verifier into a log or a rendered page
 
     $everythingWrittenDown = implode("\n", $written);
 
+    // The secret half of each token, not the whole `id|secret` string: a leak of the half that
+    // matters would otherwise satisfy a search for the whole
     expect($everythingWrittenDown)
         ->not->toContain($enrollment['device_code'])
         ->not->toContain($enrollment['verifier'])
-        ->not->toContain($credential)
-        ->not->toContain($sessionToken)
-        ->not->toContain($renewedToken);
+        ->not->toContain(explode('|', $credential, 2)[1])
+        ->not->toContain(explode('|', $sessionToken, 2)[1])
+        ->not->toContain(explode('|', $renewedToken, 2)[1]);
 
     // The control: the collector is looking at something, and can find what is meant to be there
     expect($everythingWrittenDown)

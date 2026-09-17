@@ -37,7 +37,12 @@ return new class extends Migration
             $table->unsignedBigInteger('approved_by')->nullable();
             $table->string('requested_ip', 45)->nullable();
 
-            $table->timestamp('expires_at');
+            // `dateTime`, not `timestamp`. MySQL and MariaDB with `explicit_defaults_for_timestamp`
+            // off give the first NOT NULL TIMESTAMP column in a table an implicit
+            // `DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, so every later UPDATE of the
+            // row -- granting an ability, say -- would silently reset the expiry to now and retire
+            // the installation. No CI job runs MySQL, so nothing here would catch it.
+            $table->dateTime('expires_at');
             $table->timestamp('revoked_at')->nullable();
 
             $table->timestamps();

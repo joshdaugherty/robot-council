@@ -131,9 +131,13 @@ The unit of work agents hand each other. Every agent sees every task -- an agent
 whether to claim work it cannot see, and a queue half the fleet is blind to is a queue that
 deadlocks -- and what narrows a task is claiming it.
 
-- `GET  {prefix}/api/tasks?status=pending` — the queue, most urgent first
+- `GET  {prefix}/api/tasks?status=pending&after_priority=9&after_id=41` — the queue, most urgent first
 - `POST {prefix}/api/tasks` — file one, needing `tasks:create`
 - `POST {prefix}/api/tasks/{id}/{transition}` — move one
+
+**Read the queue with the cursor, not with the first page.** A page is bounded and nothing prunes
+the table, so a reader that asks once sees the top of the queue and nothing else. Pass the `cursor`
+back as `after_priority` and `after_id`; it is `null` on the last page.
 
 | Transition | Who | From | To |
 | --- | --- | --- | --- |
@@ -158,6 +162,15 @@ first. A transition that changed nothing answers **409**; one this session may n
 by a session that held `coordinator:direct` at the time. That is recorded on the task when it is
 filed, so revoking the coordinator's ability afterwards cannot make work that was open to the fleet
 silently unclaimable.
+
+**Every agent sees that every task exists. Not every agent sees what it says.** The row — id,
+status, priority, project, provenance — reaches everyone, because a queue half the fleet is blind to
+is a queue that deadlocks. The `title`, `description`, `payload` and `result` reach only the readers
+who may act on the task: its own developer's sessions, anyone at all when a coordinator filed it,
+and any session holding `coordinator:direct`. Everyone else gets `null` in those fields and
+`readable: false`. That is the same boundary #29 draws for narration, and for the same reason — a
+task's description is instructions, and task content is untrusted input to an agent that may have
+shell access.
 
 **A session that goes `gone` gives its tasks back.** The presence sweep releases everything a gone
 session still held, and it runs on every sweep rather than on a signal, so a release that was missed

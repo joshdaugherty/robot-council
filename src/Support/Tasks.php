@@ -7,12 +7,15 @@ namespace RobotCouncil\Support;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\AgentSessionStatus;
 use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Models\Task;
 use RobotCouncil\Models\TaskStatus;
 use RobotCouncil\Models\TaskTransition;
+use Throwable;
 
 /**
  * Creating tasks and moving them between states.
@@ -28,9 +31,13 @@ use RobotCouncil\Models\TaskTransition;
  * belonging to another developer all look identical to `update()` -- so the diagnosis happens
  * afterwards, off the hot path, and answers 404, 409, or 403.
  *
- * **Lock order.** A transition takes the task row and then the feed sentinel. The release step
- * takes the session row first, so the package's order is installations, agent sessions, tasks, the
- * feed sentinel, tokens. Nothing here may take them in another order.
+ * **Lock order: agent sessions, then tasks, then the feed sentinel.** Every path here takes the
+ * session row first where it touches one, including the two transitions that write `claimed_by` --
+ * because on InnoDB an update that changes a foreign key takes a shared lock on the new parent, so
+ * a claim or a reassign locks a session row whether or not the code says so. Writing the task first
+ * and letting the foreign key take the session afterwards inverts the order against the release
+ * step, which locks the session explicitly, and two paths taking the same two rows in opposite
+ * orders is a deadlock on every engine that locks rows.
  */
 final class Tasks
 {
@@ -71,7 +78,9 @@ final class Tasks
             $this->events->record(
                 FleetEventType::TaskCreated,
                 $session,
-                sprintf('Task #%d created: %s', $task->id, $task->title),
+                // The id and nothing the creator wrote. The feed reaches every agent, and a task's
+                // own words are served by `TaskList`, which decides who may read them.
+                sprintf('Task #%d created.', $task->id),
                 ['task_id' => $task->id, 'project_id' => $task->project_id],
                 $withCoordinator
             );
@@ -103,7 +112,24 @@ final class Tasks
             ? ($assignee ?? $actor)
             : null;
 
+        if ($transition === TaskTransition::Reassign && ! $assignee instanceof AgentSession) {
+            // Unreachable through the endpoint, which validates `session_id` as required -- but
+            // this is a public method on an injectable service, and #26 and #33 call it directly.
+            // Without this a reassignment with no assignee silently hands the task to the actor.
+            throw new InvalidArgumentException('A reassignment needs the session to hand the task to.');
+        }
+
         return DB::transaction(function () use ($taskId, $transition, $actor, $asCoordinator, $holder, $result): TaskOutcome {
+            // The session row before the task row, which is the package's lock order. A claim or a
+            // reassign writes `claimed_by`, and on InnoDB that takes a shared lock on the new
+            // parent -- after the task row, inverting the order against the release step. Taking it
+            // here also closes the window the endpoint's own liveness read leaves open: the
+            // assignee is re-read under the lock, so a session that went between the two is
+            // refused rather than handed a task it will never work.
+            if ($holder instanceof AgentSession && ! $this->stillWorkable($holder)) {
+                return TaskOutcome::Conflict;
+            }
+
             $changed = $this->write($taskId, $transition, $actor, $asCoordinator, $holder, $result);
 
             if ($changed !== 1) {
@@ -142,15 +168,45 @@ final class Tasks
 
         $orphaned = Task::query()
             ->whereIn('status', TaskStatus::values(TaskStatus::held()))
-            ->whereIn('claimed_by', AgentSession::query()
-                ->select('id')
-                ->where('status', AgentSessionStatus::Gone->value))
+            ->where(function (Builder $held): void {
+                $held->whereIn('claimed_by', AgentSession::query()
+                    ->select('id')
+                    ->where('status', AgentSessionStatus::Gone->value))
+
+                    // A held task with no claimant at all. `claimed_by` is `nullOnDelete`, so
+                    // deleting an installation cascades to its sessions and leaves its tasks held
+                    // by nobody -- matching neither a claim, nor the claimant's own release, nor
+                    // the clause above. A held task with no holder is an invariant violation by
+                    // definition, so picking it up costs nothing and closes the gap.
+                    ->orWhereNull('claimed_by');
+            })
             ->orderBy('id')
             ->limit($this->credentials->maxPerSweep())
             ->get();
 
+        $failed = null;
+
         foreach ($orphaned as $task) {
-            $released += $this->releaseOne($task) ? 1 : 0;
+            try {
+                $released += $this->releaseOne($task) ? 1 : 0;
+            } catch (Throwable $failure) {
+                // Isolated per task, and the reason is the candidate order. The read is
+                // `orderBy('id')` with a limit, so a task whose release fails deterministically --
+                // a lock held elsewhere, a deadlock victim -- is first on every sweep from now on.
+                // Letting it escape the loop would leave every other gone session's tasks held for
+                // good, which is the one thing the sweep exists to prevent.
+                Log::error(
+                    sprintf('robot-council: releasing task %d from its gone session failed.', $task->id),
+                    ['exception' => $failure]
+                );
+
+                $failed ??= $failure;
+            }
+        }
+
+        // Still loud, and still after every task has had its turn
+        if ($failed instanceof Throwable) {
+            throw $failed;
         }
 
         return $released;
@@ -169,16 +225,26 @@ final class Tasks
     private function releaseOne(Task $task): bool
     {
         return DB::transaction(function () use ($task): bool {
-            $session = AgentSession::query()->whereKey($task->claimed_by)->lockForUpdate()->first();
+            $claimant = $task->claimed_by;
 
-            if (! $session instanceof AgentSession || ! $session->hasGone()) {
+            $session = $claimant === null
+                ? null
+                : AgentSession::query()->whereKey($claimant)->lockForUpdate()->first();
+
+            // A claimant that is still there has to still be gone. One that is not there at all
+            // left a held task behind, which nothing else can recover.
+            if ($claimant !== null && (! $session instanceof AgentSession || ! $session->hasGone())) {
                 return false;
             }
 
             $changed = Task::query()
                 ->whereKey($task->getKey())
                 ->whereIn('status', TaskStatus::values(TaskStatus::held()))
-                ->where('claimed_by', $session->getKey())
+                ->when(
+                    $claimant === null,
+                    fn (Builder $query) => $query->whereNull('claimed_by'),
+                    fn (Builder $query) => $query->where('claimed_by', $claimant)
+                )
                 ->update([
                     'status' => TaskStatus::Pending->value,
                     'claimed_by' => null,
@@ -196,11 +262,24 @@ final class Tasks
                 FleetEventType::TaskReleased,
                 null,
                 sprintf('Task #%d released: its session ended.', $task->id),
-                ['task_id' => $task->id, 'to' => TaskStatus::Pending->value, 'released_from' => $session->getKey()]
+                ['task_id' => $task->id, 'to' => TaskStatus::Pending->value, 'released_from' => $claimant]
             );
 
             return true;
         });
+    }
+
+    /**
+     * Whether a session can still be handed a task, read under a lock.
+     *
+     * @param  AgentSession  $session  The session about to be given the task.
+     * @return bool True when it is still there and has not gone.
+     */
+    private function stillWorkable(AgentSession $session): bool
+    {
+        $current = AgentSession::query()->whereKey($session->getKey())->lockForUpdate()->first();
+
+        return $current instanceof AgentSession && ! $current->hasGone();
     }
 
     /**
@@ -252,9 +331,12 @@ final class Tasks
         }
 
         if ($transition->takesAResult() && $result !== null) {
-            // Hand-encoded: `Eloquent\Builder::update()` applies no casts, so the model's `array`
-            // cast on this column never runs and a raw array would be stored as `Array`
-            $values['result'] = json_encode($result);
+            // Hand-encoded, because `Eloquent\Builder::update()` applies no casts: the model's
+            // `array` cast never runs here and a raw array would reach the column as `Array`.
+            // Throwing rather than returning false, because `prepareBindings()` turns false into
+            // the integer 0, which is valid JSON -- so the row would commit with `result = 0` and
+            // the failure would be silent. The model's own cast throws; this matches it.
+            $values['result'] = json_encode($result, JSON_THROW_ON_ERROR);
         }
 
         if ($transition->to() === TaskStatus::Pending) {
@@ -282,7 +364,12 @@ final class Tasks
      */
     private function diagnose(int $taskId, TaskTransition $transition, AgentSession $actor, bool $asCoordinator): TaskOutcome
     {
-        $task = Task::query()->whereKey($taskId)->first();
+        // Locked, so the diagnosis reads the row the write tested rather than one that moved in
+        // between. Postgres releases the lock on a row an UPDATE's predicate rejected and MySQL's
+        // REPEATABLE READ keeps it, so an unlocked read here answers 403 on one engine and 409 on
+        // the other for the same race -- and the difference is exactly what tells an agent whether
+        // to retry. Same row the update already targeted, so it adds no lock-order edge.
+        $task = Task::query()->whereKey($taskId)->lockForUpdate()->first();
 
         if (! $task instanceof Task) {
             return TaskOutcome::NotFound;

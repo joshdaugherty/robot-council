@@ -53,7 +53,7 @@ it('writes no credential, device code, or verifier into a log or a rendered page
         'code_verifier' => $enrollment['verifier'],
     ])->assertCreated();
 
-    $credential = stringValue($exchange->json('credential'));
+    $credential = stringValue($exchange->json('token'));
 
     $written[] = (string) $this->actingAs($this->developer, 'web')
         ->get(route('robot-council.enroll.show', ['user_code' => $enrollment['record']->user_code]))
@@ -114,7 +114,7 @@ it('stores every credential as a hash, never as itself', function (): void {
     $credential = stringValue($this->postJson(route('robot-council.device.token'), [
         'device_code' => $enrollment['device_code'],
         'code_verifier' => $enrollment['verifier'],
-    ])->json('credential'));
+    ])->json('token'));
 
     $sessionToken = stringValue($this->machine($credential)
         ->postJson(route('robot-council.sessions.start'))->json('token'));

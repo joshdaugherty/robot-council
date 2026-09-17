@@ -291,10 +291,13 @@ class TestCase extends Orchestra
      * credential would arrive as this one's. A real request boots its own application, and Octane
      * flushes the same state between requests.
      *
+     * Public rather than protected, because the helpers Pest exposes as global functions are not
+     * bound to the test case and cannot reach a protected method.
+     *
      * @param  string  $token  The plaintext bearer token.
      * @return $this The test case, with the machine's headers set.
      */
-    protected function machine(string $token): static
+    public function machine(string $token): static
     {
         $this->app?->make('auth')->forgetGuards();
 

@@ -34,7 +34,7 @@ beforeEach(function (): void {
  *
  * @param  TestCase  $case  The test case making the request.
  * @param  User  $developer  The developer approving it.
- * @param  array{record: DeviceCode, device_code: string, verifier: string}  $enrollment  The request.
+ * @param  array{record: DeviceCode, device_code: string, verifier: string, response: array<string, mixed>}  $enrollment  The request.
  */
 function approveEnrollment(TestCase $case, User $developer, array $enrollment): void
 {
@@ -50,7 +50,7 @@ function approveEnrollment(TestCase $case, User $developer, array $enrollment): 
  * Poll the token endpoint as the helper would.
  *
  * @param  TestCase  $case  The test case making the request.
- * @param  array{record: DeviceCode, device_code: string, verifier: string}  $enrollment  The request.
+ * @param  array{record: DeviceCode, device_code: string, verifier: string, response: array<string, mixed>}  $enrollment  The request.
  * @param  string|null  $verifier  A verifier other than the one the enrollment holds.
  * @return TestResponse<JsonResponse> The response.
  */
@@ -69,7 +69,7 @@ it('issues a credential that can do nothing but start sessions', function (): vo
     $response = exchange($this, $enrollment);
 
     $response->assertCreated()
-        ->assertJsonStructure(['installation_id', 'credential', 'granted_abilities', 'expires_at']);
+        ->assertJsonStructure(['installation_id', 'token', 'abilities', 'granted_abilities', 'expires_in']);
 
     expect($response->json('granted_abilities'))->toBe(['tasks:create', 'locks:acquire']);
 

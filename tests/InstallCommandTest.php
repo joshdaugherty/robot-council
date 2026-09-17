@@ -63,8 +63,7 @@ it('writes a migration that runs cleanly on a fresh application', function (): v
 
     expect(Artisan::call('robot-council:install'))->toBe(0);
 
-    $this->loadLaravelMigrations();
-    $this->loadMigrationsFrom($databasePath.'/migrations');
+    $this->migrateFresh($databasePath.'/migrations');
 
     // A GitHub-only developer has no password, and may have no email
     DB::table('users')->insert(['name' => 'octodev']);
@@ -80,8 +79,7 @@ it('keeps the email address unique after relaxing the column', function (): void
 
     expect(Artisan::call('robot-council:install'))->toBe(0);
 
-    $this->loadLaravelMigrations();
-    $this->loadMigrationsFrom($databasePath.'/migrations');
+    $this->migrateFresh($databasePath.'/migrations');
 
     DB::table('users')->insert(['name' => 'First', 'email' => 'shared@example.com', 'password' => 'hash']);
 
@@ -95,11 +93,9 @@ it('leaves a column that already admits null alone', function (): void {
 
     expect(Artisan::call('robot-council:install'))->toBe(0);
 
-    $this->loadLaravelMigrations();
-    $this->loadMigrationsFrom($databasePath.'/migrations');
-
-    // Running it a second time is a no-op, because both columns are nullable by then
-    $this->loadMigrationsFrom($databasePath.'/migrations');
+    // Running the stub twice is a no-op, because both columns are nullable after the first
+    $this->migrateFresh($databasePath.'/migrations');
+    $this->migrateFresh($databasePath.'/migrations');
 
     DB::table('users')->insert(['name' => 'octodev']);
 

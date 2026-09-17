@@ -14,6 +14,8 @@ use Orchestra\Testbench\TestCase as Orchestra;
 use RobotCouncil\Models\GithubIdentity;
 use RobotCouncil\RobotCouncilServiceProvider;
 
+use function Orchestra\Testbench\default_migration_path;
+
 /**
  * Base test case: boots a Testbench application with the package's service provider registered,
  * and provides the fixtures the suite shares — a users table carrying the package's columns,
@@ -110,13 +112,31 @@ class TestCase extends Orchestra
     }
 
     /**
-     * Migrate Laravel's own tables, the package's own tables, and the users-table change the
-     * install command writes.
+     * Drop whatever the last test left behind, then migrate Laravel's tables, the package's own,
+     * and any extra paths. A shared database keeps its rows between tests, unlike SQLite's
+     * in-memory one, so every database test starts from here.
+     *
+     * @param  string  ...$paths  Extra migration directories to run, in migration-name order.
      */
-    protected function migrateUsersTableWithPackageColumns(): void
+    protected function migrateFresh(string ...$paths): void
     {
-        $this->loadLaravelMigrations();
+        Artisan::call('migrate:fresh', [
+            '--path' => [
+                default_migration_path(),
+                \dirname(__DIR__).'/database/migrations',
+                ...$paths,
+            ],
+            '--realpath' => true,
+        ]);
+    }
 
+    /**
+     * Migrate everything, including the users-table change `robot-council:install` writes.
+     *
+     * @return string The directory holding the copy of the install stub that ran.
+     */
+    protected function migrateUsersTableWithPackageColumns(): string
+    {
         // Run the stub itself, so the suite exercises what `robot-council:install` writes
         $directory = $this->temporaryDirectory('migrations');
 
@@ -125,10 +145,9 @@ class TestCase extends Orchestra
             $directory.'/2026_01_01_000000_add_robot_council_columns_to_users_table.php'
         );
 
-        $this->loadMigrationsFrom($directory);
+        $this->migrateFresh($directory);
 
-        // Run the package's own migrations, which its service provider loads
-        Artisan::call('migrate');
+        return $directory;
     }
 
     /**

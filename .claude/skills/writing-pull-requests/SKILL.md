@@ -12,8 +12,8 @@ description: >-
   absolute branch URL, and a canonical `Closes #N.` reference — with cross-repo references
   rendered as a backticked owner/repo#N link. Covers closing-keyword traps (negation, code spans,
   cross-line pairs) and how they map onto squash, merge, and rebase merges, plus the PR lifecycle:
-  draft until ready for review, which GitHub Actions workflows run on which paths, and the
-  `Fix styling` auto-commit to pull before pushing again. Activate whenever drafting, rewriting,
+  draft until ready for review, the `CI` workflow, and its
+  required `ci-passed` check. Activate whenever drafting, rewriting,
   opening, or critiquing a GitHub pull request for this repository.
 ---
 
@@ -43,26 +43,19 @@ holds for `gh pr edit <n> --body-file`.
 
 - **Open as draft until the branch is ready for review; flip it with `gh pr ready <n>` when it
   is.** Never present a PR as ready while its branch still needs work.
-- **Know which checks a change triggers.** All workflows come from the package skeleton:
-  - `run-tests` — on push **and** pull request touching `**.php`, `phpunit.xml.dist`,
-    `composer.json`, `composer.lock`, or its own workflow file. Matrix: `ubuntu-latest` and
-    `windows-latest` × PHP 8.5 and 8.4 × Laravel 13 and 12 × `prefer-lowest` and
-    `prefer-stable`, with `fail-fast: true`, so the first failing cell cancels the rest and one
-    red cell hides the others' results.
-  - `PHPStan` — on **push only**, touching `**.php`, `phpstan.neon.dist`, or its workflow file.
-  - `Fix PHP code style issues` — on push touching `**.php`; runs Pint and commits any fixes back
-    to the pushed branch.
-
-  A PR whose files match none of those paths — only Markdown or `.claude/**`, for example —
-  triggers no workflow, so an empty checks panel there is expected rather than a failure. `PHPStan` and the style fix run
-  only on pushes, so neither runs in this repository for a PR from a fork.
-- **Pull before pushing again.** When the style workflow commits `Fix styling` to the remote
-  branch after a push, the local branch is behind it and the next push is rejected as
-  non-fast-forward. `git pull --rebase` first (see [`sync-pr-branch`](../../rules/sync-pr-branch.md)
-  for bringing a branch current with `main`). Running `vendor/bin/pint --test` before pushing
-  avoids the extra commit. The auto-commit is pushed with the workflow's `GITHUB_TOKEN`, which does
-  not start new workflow runs, so the `Fix styling` commit itself gets no `run-tests` or `PHPStan`
-  run; their results stay on the commit before it.
+- **Every pull request runs the same checks.** `.github/workflows/ci.yml` runs on every pull
+  request, with no path filters:
+  - `tests` — `vendor/bin/pest --ci` on `ubuntu-latest` and `windows-latest` × PHP 8.5 and 8.4 ×
+    Laravel 13 and 12 × `prefer-lowest` and `prefer-stable`, with `fail-fast: false`, so every
+    cell reports.
+  - `phpstan` — PHPStan on PHP 8.5.
+  - `pint` — `vendor/bin/pint --test`, which fails on a style problem and fixes nothing. Run
+    `vendor/bin/pint --dirty` before pushing.
+  - `ci-passed` — succeeds only when all three succeeded. It is the check the `main` ruleset
+    requires, alongside a pull request and a branch that is up to date with `main`.
+- **A PR's checks describe its current head only.** After a push, or after syncing with `main`
+  per [`sync-pr-branch`](../../rules/sync-pr-branch.md), read `ci-passed` again on the new head
+  rather than trusting an earlier green.
 
 ## Assign yourself to every pull request you open
 
@@ -223,7 +216,7 @@ row's label; the text said it closed nothing, a grep for `Closes #N` could not m
 `closingIssuesReferences` was empty, yet the merge closed the issue. See
 [`writing-commits`](../writing-commits/SKILL.md) for the table shape to avoid.
 
-**Check both paths before merging** (when to run it is [`pre-merge-check`](../../rules/pre-merge-check.md)'s):
+**Check both paths before merging.** No CI job covers this, and [`pre-merge-check`](../../rules/pre-merge-check.md) points here for it:
 read the field with `gh pr view <N> --json closingIssuesReferences`, then list every
 keyword-reference pair in the plain text, same-line and cross-line alike:
 
@@ -277,12 +270,10 @@ Fenced code blocks (with language tags `php`, `yaml`, `bash`, etc.) are reserved
 Every PR ends with a `## Test plan` GitHub task list. Conventions:
 
 - `- [x]` = author has already verified; `- [ ]` = unverified, deferred to reviewer or CI.
-- **Include the local gate and a "CI green" item** for any PR that touches PHP or Composer files.
-  The canonical lines are:
+- **Include the local gate and a "CI green" item** on every PR. The canonical lines are:
   `- [x] `composer test`, `composer analyse`, and `vendor/bin/pint --test` pass locally.`
-  `- [x] CI green (`run-tests` matrix, `PHPStan`; `Fix PHP code style issues` committed nothing).`
-  Tick the CI line only when every matrix cell ran and passed; with `fail-fast`, a cancelled cell
-  is not a passing one. A PR that triggers no workflow says so instead of claiming CI green.
+  `- [x] CI green: `ci-passed` succeeded on the head commit.`
+  Tick the CI line only for the current head; a push after the tick makes it stale.
 - Items describe **observable checks**, not implementation steps. Be concrete: name commands,
   test names, config values, and output.
 - Imperative mood, often a full sentence or two of context per item.
@@ -336,7 +327,7 @@ public function members(): array
 ## Test plan
 
 - [x] `composer test`, `composer analyse`, and `vendor/bin/pint --test` pass locally.
-- [x] CI green (`run-tests` matrix, `PHPStan`; `Fix PHP code style issues` committed nothing).
+- [x] CI green: `ci-passed` succeeded on the head commit.
 - [x] `vendor/bin/pest --filter=members` covers both paths:
   - With the key absent, `members()` returns `[]`.
   - With the key set to a list, `members()` returns it unchanged.

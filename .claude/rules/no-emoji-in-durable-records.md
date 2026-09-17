@@ -1,6 +1,6 @@
 # Rule — no emoji in durable records
 
-**Emoji do not appear in anything this repo keeps.** That covers issue and pull-request titles, bodies, and comments; commit messages; release titles and bodies (the `Update Changelog` workflow copies both into the committed `CHANGELOG.md`); every file under `.claude/`; and the README.
+**Emoji do not appear in anything this repo keeps.** That covers issue and pull-request titles, bodies, and comments; commit messages; release titles and bodies, and the `CHANGELOG.md` entries made from them; every file under `.claude/`; and the README.
 
 ## Why this is a standing order
 

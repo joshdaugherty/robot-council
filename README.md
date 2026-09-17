@@ -1,8 +1,7 @@
 # This is my package robot-council
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/joshdaugherty/robot-council.svg?style=flat-square)](https://packagist.org/packages/joshdaugherty/robot-council)
-[![GitHub Tests Action Status](https://github.com/joshdaugherty/robot-council/actions/workflows/run-tests.yml/badge.svg)](https://github.com/joshdaugherty/robot-council/actions?query=workflow%3Arun-tests+branch%3Amain)
-[![GitHub Code Style Action Status](https://github.com/joshdaugherty/robot-council/actions/workflows/fix-php-code-style-issues.yml/badge.svg)](https://github.com/joshdaugherty/robot-council/actions?query=workflow%3A"Fix+PHP+code+style+issues"+branch%3Amain)
+[![CI](https://github.com/joshdaugherty/robot-council/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/joshdaugherty/robot-council/actions/workflows/ci.yml?query=branch%3Amain)
 [![Total Downloads](https://img.shields.io/packagist/dt/joshdaugherty/robot-council.svg?style=flat-square)](https://packagist.org/packages/joshdaugherty/robot-council)
 
 This is where your description should go. Limit it to a paragraph or two. Consider adding a small example.

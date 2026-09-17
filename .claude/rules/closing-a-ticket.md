@@ -6,7 +6,7 @@ Work is not done when the code works. It is done when the branch has merged, the
 
 ## How to apply
 
-1. **Never push to `main`.** Branch, open a pull request, and let it merge — for a one-line docs fix as much as a feature, and when you are the only person working. `main` has no branch protection, so nothing but this discipline stops a push; the workflows' own commits there (`Update CHANGELOG`, `Fix styling`) are not a precedent. A local commit with no branch is fine while nothing ships; a push to `main` is not.
+1. **Never push to `main`.** Branch, open a pull request, and let it merge — for a one-line docs fix as much as a feature, and when you are the only person working. The `main` ruleset refuses a direct push while it is `active`, but it can be disabled. A local commit with no branch is fine while nothing ships; a push to `main` is not.
 
 2. **Tick acceptance criteria as you meet them, not in a sweep at the end.** A criterion ticked while the work is fresh records what actually satisfied it. A sweep at the end records what you remember.
 

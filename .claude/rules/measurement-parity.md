@@ -6,13 +6,13 @@ Before you compare a measurement against a prior one, such as a suite time, a CI
 
 ## How to apply
 
-1. **Open the baseline's harness and read it.** If a number came from a script or a workflow, that file is the specification. Here the CI test job is `.github/workflows/run-tests.yml`, and it is not `composer test`. For each matrix cell it:
+1. **Open the baseline's harness and read it.** If a number came from a script or a workflow, that file is the specification. Here the CI test job is `tests` in `.github/workflows/ci.yml`, and it is not `composer test`. For each matrix cell it:
    - runs `setup-php` with a fixed extension list and `coverage: none`
    - runs `composer require "laravel/framework:<13.*|12.*>" "orchestra/testbench:<11.*|10.*>" --no-update`
    - runs `composer update --prefer-lowest|--prefer-stable --prefer-dist`
    - runs `vendor/bin/pest --ci`
 
-   The `PHPStan` workflow runs on PHP 8.5. Setup steps live in the harness, not in the sentence someone wrote about it.
+   The `phpstan` job runs on PHP 8.5. Setup steps live in the harness, not in the sentence someone wrote about it.
 
 2. **Enumerate the parity checklist, and log it in the run.** For this package:
    - **PHP version and loaded extensions.** CI runs PHP 8.5 and 8.4 (PHPStan runs 8.5 only), with the listed extensions and **no coverage driver**. Local Herd PHP 8.4.23 loads **PCOV** (enabled, with `pcov.directory` resolved to `src`) plus extensions CI does not have. Compare `php -v` and `php -m` on both sides.

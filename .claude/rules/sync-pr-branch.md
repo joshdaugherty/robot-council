@@ -6,9 +6,9 @@ Before a branch is validated and before its pull request is opened, bring it **c
 
 ## How to apply
 
-1. **Author side: sync before running the gate and before opening the PR.** First pick up anything the style workflow pushed. It auto-commits "Fix styling" to a branch after any push touching `**.php`, so run `git fetch origin && git merge --ff-only origin/<branch>`. Then run `git merge origin/main`, and only after that run `composer test`, `composer analyse`, `vendor/bin/pint --test`, and `gh pr create`. A conflict found here is caught before review rather than after merge.
+1. **Author side: sync before running the gate and before opening the PR.** Run `git fetch origin && git merge origin/main`, and only after that run `composer test`, `composer analyse`, `vendor/bin/pint --test`, and `gh pr create`. A conflict found here is caught before review rather than after merge.
 
-2. **Validator side: sync before validating**, then trial-merge and validate the merged state per [`pre-merge-check`](pre-merge-check.md).
+2. **The ruleset enforces this at merge time.** It requires the branch to be up to date with `main` and `ci-passed` to succeed on it, so a branch behind `main` cannot merge until it is synced and the checks re-run (see [`pre-merge-check`](pre-merge-check.md)). Syncing earlier is still cheaper: a conflict or an interaction found before review costs less than one found at the merge button.
 
 3. **The exception: genuinely disjoint branches need not chase every advance of `main`. But judge disjointness by the inputs the checks READ, not only by the files the diff TOUCHES.** A branch is exempt only when it shares neither files nor inputs with the merges since its branch point. For this repository, the inputs are:
 
@@ -16,10 +16,10 @@ Before a branch is validated and before its pull request is opened, bring it **c
    | --- | --- |
    | `composer.json` | every CI job and every local command, because it decides which Pest, PHPStan, Larastan, Pint, Laravel, and Testbench versions get installed |
    | *no committed `composer.lock`* | every CI job, which resolves dependencies fresh on each run (see below) |
-   | `phpstan.neon.dist`, `phpstan-baseline.neon` | the `PHPStan` workflow, `composer analyse` |
-   | `phpunit.xml.dist` | `run-tests`, `composer test` |
+   | `phpstan.neon.dist`, `phpstan-baseline.neon` | the `phpstan` job, `composer analyse` |
+   | `phpunit.xml.dist` | the `tests` job, `composer test` |
    | `tests/Pest.php`, `tests/TestCase.php` | every test: they bind the base test case and register the service provider |
-   | `.github/workflows/*` | the checks themselves: triggers, path filters, matrix, flags |
+   | `.github/workflows/ci.yml` | the checks themselves: triggers, matrix, flags, and which jobs `ci-passed` requires |
    | `pint.json` *(does not exist yet)* | Pint. Today Pint runs the Laravel preset defaults, so the only input that moves is Pint's resolved version. Once a `pint.json` is committed, it is an interacting input like the rest. |
 
    **Checking takes one read**, and a path that does not exist yet is harmless after `--`:

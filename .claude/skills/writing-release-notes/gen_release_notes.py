@@ -13,7 +13,7 @@ Because PR titles are held to house style by the `writing-pull-requests`
 skill, the live titles are already clean; this tool only strips residual noise
 (Conventional-Commit prefixes, `[skip ci]` litter, merge-order hints, redundant
 `(#NNN)` refs), fixes acronym casing, drops `&`, and applies the Oxford comma.
-The workflow auto-commits `Fix styling` and `Update CHANGELOG` are skipped.
+Changelog pull requests (`Update CHANGELOG for vX.Y.Z`) are skipped.
 
 Usage:
   gen_release_notes.py [options] <prev-ref> <new-ref>
@@ -185,9 +185,9 @@ def bucket(subject, title, labels=(), paths=(), test_lines=0, other_lines=0):
 
 GLOBAL_SKIP = [
     re.compile(r"^Merge branch ", re.I), re.compile(r"^Merge remote-tracking", re.I),
-    # Auto-commits from the GitHub Actions workflows: Pint's `Fix styling` on a pushed
-    # branch (including `main` after a merge), and `Update CHANGELOG` on `main` after a release.
-    re.compile(r"^Fix styling$"), re.compile(r"^Update CHANGELOG$"),
+    # A changelog pull request (`Update CHANGELOG for vX.Y.Z`) records a release rather than
+    # belonging to one. Matched against the raw subject and the resolved PR title alike.
+    re.compile(r"^Update CHANGELOG\b"),
 ]
 
 _pr_cache = {}
@@ -331,7 +331,7 @@ def main():
         if not s or any(r.search(s) for r in GLOBAL_SKIP):
             continue
         pr, title, link = resolve(s, a.repo)
-        if not title or (pr is not None and pr in excl):
+        if not title or (pr is not None and pr in excl) or any(r.search(title) for r in GLOBAL_SKIP):
             continue
         if pr is None:  # direct commit -> link the short SHA
             link = f"[`{sha[:7]}`](https://github.com/{a.repo}/commit/{sha})"

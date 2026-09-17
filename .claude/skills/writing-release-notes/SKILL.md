@@ -9,8 +9,8 @@ description: >-
   `- <PR title> [#N](…/pull/N)` — using the API PR title (never a merge or squash commit
   subject), no `by @author`, inline code preserved. Covers the routing cascade and the bundled
   generator, semantic versioning for a library consumers resolve by tag (below 1.0 the
-  minor is the Composer caret's breaking boundary), how the `Update Changelog` workflow turns a
-  release into a `CHANGELOG.md` entry, and the retroactive-tag footer. Activate whenever drafting,
+  minor is the Composer caret's breaking boundary), cutting a release (the `CHANGELOG.md` pull
+  request, then the tag and the GitHub Release), and the retroactive-tag footer. Activate whenever drafting,
   rewriting, or critiquing a GitHub Release title or body, generating release notes, or cutting
   a tag for this repo.
 ---
@@ -41,8 +41,8 @@ cut a release, and when `1.0.0` happens, are not decided here.
 concise Title-Case theme (no trailing period). Examples: `v0.2.0 — Council Configuration`,
 `v0.3.0 — Config Publishing, Facade Helpers, and Migrations`.
 
-The title is not cosmetic: the `Update Changelog` workflow uses the release **name** as the version
-heading in `CHANGELOG.md` (see *Creating / editing releases* below).
+The title is not cosmetic: it is also the version heading of the release's `CHANGELOG.md` entry
+(see *Cutting a release* below).
 
 ## Body structure (in order)
 
@@ -126,7 +126,7 @@ Don't hand-assemble the buckets — run the bundled generator. It reads first-pa
 for a ref range, pulls each PR's title **live from the GitHub API** (`gh`), and applies every
 rule above: prefix/`[skip ci]`/merge-hint stripping, acronym casing, the routing cascade, `&`→and
 with the Oxford comma, `[#N]` PR links, and backticked-short-SHA links for direct commits. It skips
-the workflow auto-commits `Fix styling` and `Update CHANGELOG`. It depends only on `git`, `gh`, and
+changelog pull requests titled `Update CHANGELOG for vX.Y.Z`. It depends only on `git`, `gh`, and
 Python 3 (3.9 or later) — no other setup.
 
 The **editorial** parts it can't infer are passed as flags: the one-sentence `--lead`, the
@@ -134,7 +134,7 @@ The **editorial** parts it can't infer are passed as flags: the one-sentence `--
 so it doesn't also auto-list in a bucket).
 
 ```
-python3 .claude/skills/writing-release-notes/gen_release_notes.py <prev-tag> <new-tag> \
+python3 .claude/skills/writing-release-notes/gen_release_notes.py <prev-tag> origin/main \
     --lead "One-sentence milestone theme." \
     --breaking "republish the config file and rename \`seats\` to \`members\`." \
     --breaking-item "Rename the \`seats\` config key to \`members\` [#12](https://github.com/joshdaugherty/robot-council/pull/12)." \
@@ -142,30 +142,49 @@ python3 .claude/skills/writing-release-notes/gen_release_notes.py <prev-tag> <ne
     > body.md
 ```
 
-Then review `body.md` and create/edit the release with it (below). `--help` lists all flags;
-`<prev-tag>` may be `-` for the repo root (first release). The routing is a heuristic: read every
+The new tag does not exist yet when the body is generated, so the range ends at `origin/main`
+(fetch first). Then review `body.md` and use it as below. `--help` lists all flags; `<prev-tag>`
+may be `-` for the repo root (first release). The routing is a heuristic: read every
 bucket before publishing and move a bullet the cascade misfiled.
 
-## Creating / editing releases with `gh`
+## Cutting a release
 
-Write the body to a file and pass `--notes-file` (never inline `--notes` — the bodies are dense
-with backticks, `#`, and `—` that the shell mangles).
+**`CHANGELOG.md` changes through a pull request like everything else, before the tag.** Nothing
+writes it automatically: the `main` ruleset requires a pull request and a successful `ci-passed` for
+every change, so the tag must point at a commit that already carries the entry.
 
-```
-gh release create vX.Y.Z --title 'vX.Y.Z — <Theme>' --notes-file notes.md --verify-tag
-gh release edit   vX.Y.Z --title 'vX.Y.Z — <Theme>' --notes-file notes.md
-```
+1. **Generate and review the body** against `origin/main`, as above.
 
-**What the `Update Changelog` workflow does with it.** It runs on the `release` event with type
-`released` only. It adds the release as the newest entry in `CHANGELOG.md`, using the release
-**name** as the version heading and the release **body** as its content, then commits
-`Update CHANGELOG` directly to `main`. Three consequences follow:
+2. **Open the changelog pull request** from a branch such as `changelog-vX.Y.Z`, titled exactly
+   `Update CHANGELOG for vX.Y.Z` (the generator skips that title, so the pull request never lists
+   itself in a later release). Add the entry at the top of `CHANGELOG.md`, directly under the intro
+   paragraph: a `## vX.Y.Z — <Theme> (YYYY-MM-DD)` heading, then the body with each `##` heading
+   demoted to `###` so the buckets nest under the version:
 
-- **A prerelease (`--prerelease`) does not update `CHANGELOG.md`.** Changing a prerelease to a full
-  release later does fire `released`, and the entry is written then.
-- **Get the title and body right before the release goes out.** Editing a published release's title
-  or notes fires `edited`, not `released`, so `CHANGELOG.md` keeps what the release said at the time.
-- **`main` moves on GitHub after a release**, so a local `main` is a commit behind until pulled.
+   ```
+   sed 's/^## /### /' body.md
+   ```
+
+   Merge it once `ci-passed` succeeds and [`pre-merge-check`](../../rules/pre-merge-check.md) is
+   done.
+
+3. **Tag the merge and publish the release**, after confirming that `origin/main` is the changelog
+   merge and nothing else landed after it:
+
+   ```
+   git fetch origin
+   git log --oneline -1 origin/main
+   git tag -a vX.Y.Z origin/main -m 'vX.Y.Z — <Theme>'
+   git push origin vX.Y.Z
+   gh release create vX.Y.Z --title 'vX.Y.Z — <Theme>' --notes-file body.md --verify-tag
+   ```
+
+   Write the body to a file and pass `--notes-file` (never inline `--notes` — the bodies are dense
+   with backticks, `#`, and `—` that the shell mangles). The release body is `body.md` as generated,
+   with `##` headings; only the `CHANGELOG.md` copy is demoted.
+
+**Keep the release and the entry in step.** `gh release edit vX.Y.Z --title '…' --notes-file notes.md`
+changes only the release, so a correction to one is a pull request to the other.
 
 Retroactive tags: create an **annotated** tag stamped with the target commit's date so
 `git tag --sort=creatordate` orders correctly —
@@ -178,5 +197,5 @@ already reflects the tagged commit's date.
 This is the standing statement of Release conventions. It composes with
 [`writing-commits`](../writing-commits/SKILL.md) and
 [`writing-pull-requests`](../writing-pull-requests/SKILL.md) (the PR titles this skill renders
-come from those). The workflow's own behavior lives in `.github/workflows/update-changelog.yml`, and
-the `gh` flags live in that tool; don't restate them.
+come from those) and with [`pre-merge-check`](../../rules/pre-merge-check.md), which the changelog
+pull request goes through like any other. The `gh` flags live in that tool; don't restate them.

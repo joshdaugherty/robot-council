@@ -103,7 +103,7 @@ LABEL_SEC = {"security"}
 # A change confined to these is tooling or prose whatever its title says. Top-level
 # dotfiles (`.editorconfig`, `.gitattributes`, `.gitignore`) count too; see _is_maint.
 MAINT_PREFIXES = (".github/", ".claude/", "tests/", "workbench/")
-MAINT_FILES = {"composer.json", "phpstan.neon.dist", "phpstan-baseline.neon", "phpunit.xml.dist",
+MAINT_FILES = {"composer.json", "phpstan.neon.dist", "phpstan-baseline.neon", "phpunit.xml.dist", "rector.php",
                "CHANGELOG.md", "README.md", "LICENSE.md"}
 
 # Published, consumer-visible surfaces of the package: what an application installing it

@@ -51,7 +51,9 @@ holds for `gh pr edit <n> --body-file`.
   - `phpstan` — PHPStan on PHP 8.5.
   - `pint` — `vendor/bin/pint --test`, which fails on a style problem and fixes nothing. Run
     `vendor/bin/pint --dirty` before pushing.
-  - `ci-passed` — succeeds only when all three succeeded. It is the check the `main` ruleset
+  - `rector` — `vendor/bin/rector --dry-run`, which fails when Rector would change a file. Run
+    `composer refactor` before pushing, and review its changes.
+  - `ci-passed` — succeeds only when all four succeeded. It is the check the `main` ruleset
     requires, alongside a pull request and a branch that is up to date with `main`.
 - **A PR's checks describe its current head only.** After a push, or after syncing with `main`
   per [`sync-pr-branch`](../../rules/sync-pr-branch.md), read `ci-passed` again on the new head

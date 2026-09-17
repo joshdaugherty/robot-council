@@ -96,12 +96,32 @@ jobs:
       - name: Check code style
         run: vendor/bin/pint --test
 
+  rector:
+    name: rector
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+
+      - name: Install composer dependencies
+        uses: ramsey/composer-install@v4
+
+      - name: Run Rector (dry run)
+        run: vendor/bin/rector --dry-run --no-progress-bar
+
   # The one check the `main` ruleset requires. It always runs, and it passes only when every
   # job above succeeded, so a failed, cancelled, or skipped job all block the merge.
   ci-passed:
     name: ci-passed
     if: always()
-    needs: [tests, phpstan, pint]
+    needs: [tests, phpstan, pint, rector]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -110,6 +130,7 @@ jobs:
           TESTS: ${{ needs.tests.result }}
           PHPSTAN: ${{ needs.phpstan.result }}
           PINT: ${{ needs.pint.result }}
+          RECTOR: ${{ needs.rector.result }}
         run: |
-          echo "tests=$TESTS phpstan=$PHPSTAN pint=$PINT"
-          [ "$TESTS" = success ] && [ "$PHPSTAN" = success ] && [ "$PINT" = success ]
+          echo "tests=$TESTS phpstan=$PHPSTAN pint=$PINT rector=$RECTOR"
+          [ "$TESTS" = success ] && [ "$PHPSTAN" = success ] && [ "$PINT" = success ] && [ "$RECTOR" = success ]

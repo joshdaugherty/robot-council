@@ -15,9 +15,13 @@ description: >-
 # PHP Coding Standards
 
 This skill encodes the package's always-on PHP conventions so new and refactored code matches
-them and passes Pint and PHPStan cleanly. Pint runs with the Laravel preset (there is no
-`pint.json`) and enforces some of these mechanically; everything marked as a convention is
+them and passes Pint, Rector, and PHPStan cleanly. Pint runs with the Laravel preset (there is no
+`pint.json`) and Rector runs with [`rector.php`](../../../rector.php); each enforces some of these
+mechanically, and CI fails when either would change a file. Everything marked as a convention is
 applied by hand, because nothing else checks it.
+
+**Every PHP file declares `declare(strict_types=1);`** after the opening tag. Rector's
+`SafeDeclareStrictTypesRector` adds it where it is safe to.
 
 ## 1. Type hints (always required where the parent allows)
 
@@ -98,7 +102,7 @@ Always use curly braces, even for single-line bodies.
 
 ## 4. Arrow functions vs anonymous functions vs first-class callables
 
-A convention; no tool rewrites these here.
+Rector enforces the rewrites below: `ClosureToArrowFunctionRector` turns a single-expression closure into `fn`, and `ArrowFunctionDelegatingCallToFirstClassCallableRector` turns a pure pass-through into `$obj->method(...)` when it can resolve the method. The judgment of when a closure should stay a `function` is still yours.
 
 - **Prefer `fn`** for single-expression closures with no scope mutation and no complex `use`
   clause.
@@ -123,7 +127,7 @@ argument transforms.
 
 ## 5. Literal + variable strings → `sprintf()` / concatenation
 
-A convention for the interpolation half — Pint leaves `"{$var}"` interpolation alone:
+A convention for the interpolation half — neither Pint nor the Rector sets in `rector.php` rewrite `"{$var}"` interpolation:
 
 - **`sprintf()`** for a format string with one or more embedded placeholders — `%s` for strings,
   `%d` for integers. A literal `\n` lifts to a trailing `PHP_EOL` argument (single-quoted
@@ -184,12 +188,13 @@ function … should be called in global namespace to allow compiler optimization
 ## 7. Constructors
 
 - Use **constructor property promotion**:
-  `public function __construct(private Factory $filesystems) {}`.
+  `public function __construct(private Factory $filesystems) {}`. Rector enforces it
+  (`ClassPropertyAssignToConstructorPromotionRector`).
 - Disallow an empty zero-parameter `__construct()` unless it is `private` (factory pattern).
 
 ## 8. Typed class constants (PHP 8.3+; the package requires `^8.4`)
 
-Type literal-valued constants so static analysis can infer without `@var` workarounds.
+Type literal-valued constants so static analysis can infer without `@var` workarounds. Rector enforces it (`AddTypeToConstRector`).
 
 ```php
 private const string CACHE_KEY = 'robot-council.summary';
@@ -306,4 +311,6 @@ unset(
   runs `vendor/bin/pint --test`, so an unformatted file fails `ci-passed` and blocks the merge.
 - Run the affected tests with `vendor/bin/pest --compact tests/ExampleTest.php` or
   `vendor/bin/pest --compact --filter='test name'`.
+- Run `composer refactor` before finalizing, then review its diff; CI's `rector` job runs
+  `vendor/bin/rector --dry-run` and fails when Rector would change a file.
 - Run `composer analyse` when signatures, types, or contracts changed.

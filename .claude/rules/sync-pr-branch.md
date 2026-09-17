@@ -18,6 +18,7 @@ Before a branch is validated and before its pull request is opened, bring it **c
    | *no committed `composer.lock`* | every CI job, which resolves dependencies fresh on each run (see below) |
    | `phpstan.neon.dist`, `phpstan-baseline.neon` | the `phpstan` job, `composer analyse` |
    | `phpunit.xml.dist` | the `tests` job, `composer test` |
+   | `rector.php` | the `rector` job, `composer refactor`, `composer test:refactor` |
    | `tests/Pest.php`, `tests/TestCase.php` | every test: they bind the base test case and register the service provider |
    | `.github/workflows/ci.yml` | the checks themselves: triggers, matrix, flags, and which jobs `ci-passed` requires |
    | `pint.json` *(does not exist yet)* | Pint. Today Pint runs the Laravel preset defaults, so the only input that moves is Pint's resolved version. Once a `pint.json` is committed, it is an interacting input like the rest. |

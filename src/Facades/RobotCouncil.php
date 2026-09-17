@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace JoshDaugherty\RobotCouncil\Facades;
 
 use Illuminate\Support\Facades\Facade;

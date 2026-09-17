@@ -1,0 +1,161 @@
+---
+name: pest-testing
+description: "Use this skill for Pest PHP testing in this Laravel package (Pest 4 on Orchestra Testbench). Trigger whenever any test is being written, edited, fixed, or refactored — including fixing tests that broke after a code change, adding assertions, converting PHPUnit to Pest, adding datasets, and TDD workflows. Always activate when the user asks how to write something in Pest, mentions test files or the tests/ directory, tests/Pest.php, tests/TestCase.php, or tests/ArchTest.php, or needs architecture tests. Covers: test()/it()/expect() syntax, running tests with composer test or vendor/bin/pest, datasets, mocking and facade-mock cleanup, console command assertions, arch(), and the Testbench TestCase. Do not use for factories, migrations, service providers, or non-test PHP code."
+license: MIT
+metadata:
+  author: laravel
+---
+
+# Pest Testing
+
+## Documentation
+
+Read the installed version rather than recalling another one: `composer show pestphp/pest`
+(4.7.8 when this was written; `composer.lock` is not committed, so a fresh install can resolve
+differently) and its source under `vendor/pestphp/pest/src`, `vendor/pestphp/pest-plugin-laravel/src`,
+and `vendor/pestphp/pest-plugin-arch/src`. For prose documentation use
+[pestphp.com/docs](https://pestphp.com/docs) and, for the package test harness,
+[Orchestra Testbench](https://packages.tools/testbench).
+
+## Basic Usage
+
+### How the suite is wired
+
+- Tests live directly in `tests/` as `*Test.php` files (`phpunit.xml.dist` defines one suite over
+  `tests`). There is no `Feature/` / `Unit/` split yet.
+- `tests/Pest.php` does `uses(TestCase::class)->in(__DIR__)`, so every test file runs on
+  `JoshDaugherty\RobotCouncil\Tests\TestCase`, which extends `Orchestra\Testbench\TestCase` and
+  registers `RobotCouncilServiceProvider`. The package is booted inside a Testbench application
+  in every test; `$this->app`, facades, and `$this->artisan()` are available.
+- `tests/ArchTest.php` holds the architecture tests (currently: no `dd`, `dump`, or `ray`).
+- Do NOT remove tests without approval.
+
+### Creating Tests
+
+Create test files by hand in `tests/`. There is no `php artisan` here. `vendor/bin/testbench list`
+does show `make:test` (from Orchestra Canvas) and `pest:test`, but both write relative to the
+Testbench application's base path — the skeleton under `vendor/orchestra/testbench-core/laravel`
+— not this package's `tests/`, and Canvas without a `canvas.yaml` generates feature tests that
+extend `Tests\TestCase`, which does not exist here. Do not use them.
+
+### Basic Test Structure
+
+Pest supports both `test()` and `it()`. Check existing files first and match them; the current
+tests use `it()`.
+
+```php
+it('can test', function () {
+    expect(true)->toBeTrue();
+});
+```
+
+### Running Tests
+
+- Run minimal tests with a filter before finalizing: `vendor/bin/pest --compact --filter='can test'`.
+- Run one file: `vendor/bin/pest --compact tests/ExampleTest.php`.
+- Run everything: `composer test` (which runs `vendor/bin/pest`) or `vendor/bin/pest --compact`.
+- Coverage: `composer test-coverage` (needs a coverage driver; see the
+  [`pcov-setup`](../pcov-setup/SKILL.md) skill).
+- CI's `run-tests` workflow runs `vendor/bin/pest --ci` across its OS / PHP / Laravel matrix.
+
+`phpunit.xml.dist` sets `executionOrder="random"`, `failOnRisky`, `failOnWarning`, and
+`beStrictAboutOutputDuringTests`, so an order-dependent test flakes and a test that prints output
+fails.
+
+## Assertions
+
+Use specific assertions instead of generic status or exit-code checks:
+
+```php
+it('runs the command', function () {
+    $this->artisan('robot-council')
+        ->expectsOutput('All done')
+        ->assertSuccessful();
+});
+```
+
+| Use | Instead of |
+|-----|------------|
+| `assertSuccessful()` | `assertStatus(200)` / `assertExitCode(0)` |
+| `assertNotFound()` | `assertStatus(404)` |
+| `assertForbidden()` | `assertStatus(403)` |
+
+The HTTP forms apply once the package registers routes; there are none yet.
+
+## Mocking
+
+Import the mock function before use: `use function Pest\Laravel\mock;`
+
+### A mocked facade is still installed during `afterEach` — never clean up through one
+
+In Pest 4.7.8, `Concerns/Testable.php`'s `tearDown()` calls the file's `afterEach` closure inside
+a `try` and `parent::tearDown()` — Testbench's teardown, which flushes the application — in the
+`finally`. So a facade you swapped inside the test is still the facade root while your
+cleanup runs. Cleanup that calls back through it can silently do nothing, and the test still
+reports green:
+
+```php
+// The test mocks isDirectory() to simulate a stale check...
+File::partialMock()->shouldReceive('isDirectory')->with($dir)->andReturnFalse();
+
+// ...and Filesystem::deleteDirectory() OPENS with its own isDirectory() guard,
+// so this returns false and the directory survives.
+afterEach(fn () => File::deleteDirectory($dir));
+```
+
+Clean up through a real instance instead, which no mock can intercept:
+
+```php
+afterEach(function () use (&$dirs): void {
+    $files = new Illuminate\Filesystem\Filesystem;   // NOT the File facade
+
+    foreach ($dirs as $dir) {
+        $files->deleteDirectory($dir);
+    }
+});
+```
+
+It stays silent for a second reason: `AfterEachRepository::get()` chains `Mockery::close()`
+**ahead of** the file's `afterEach`, and Mockery checks call counts at close, so an exhausted
+`->once()` expectation does **not** fail the test when the cleanup re-enters it. **Whenever a
+test both mocks a facade and creates files, verify the cleanup by listing the directory before
+and after a run** — green is not evidence here.
+
+## Datasets
+
+Use datasets for repetitive tests (validation rules, input variants):
+
+```php
+it('has emails', function (string $email) {
+    expect($email)->not->toBeEmpty();
+})->with([
+    'james' => 'james@laravel.com',
+    'taylor' => 'taylor@laravel.com',
+]);
+```
+
+## Architecture Testing
+
+Architecture tests enforce code conventions. Add them to `tests/ArchTest.php`:
+
+```php
+arch('commands extend the framework command')
+    ->expect('JoshDaugherty\RobotCouncil\Commands')
+    ->toExtend('Illuminate\Console\Command');
+```
+
+Pest also ships presets (`arch()->preset()->php()`, `->security()`, `->laravel()`, `->strict()`;
+see `vendor/pestphp/pest/src/ArchPresets/`). Check what a preset asserts before adopting it — the
+`laravel` preset's expectations target the `App\` namespace, which this package does not have.
+
+Browser, smoke, and visual-regression testing need Pest plugins that are not installed here.
+
+## Common Pitfalls
+
+- Not importing `use function Pest\Laravel\mock;` before using `mock()`
+- Using `assertStatus(200)` or `assertExitCode(0)` instead of `assertSuccessful()`
+- Forgetting datasets for repetitive validation tests
+- Deleting tests without approval
+- Cleaning up through a facade the test mocked (see Mocking)
+- Generating a test with `vendor/bin/testbench make:test` or `pest:test`, which lands under `vendor/`
+- Relying on test order or printing output, both of which `phpunit.xml.dist` turns into failures

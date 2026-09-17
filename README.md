@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/robot-council/core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/robot-council/core/actions/workflows/ci.yml?query=branch%3Amain)
 
-The core package of Robot Council, a coordination service for fleets of AI coding agents. It is installed into a host Laravel application, which it gives GitHub sign-in restricted to an allowlist of GitHub accounts, and agent enrollment through the device-code flow, agent-session presence, and the fleet's change feed. The rest of the service — task claims and named locks — is designed in [issue #14](https://github.com/robot-council/core/issues/14) and not built yet.
+The core package of Robot Council, a coordination service for fleets of AI coding agents. It is installed into a host Laravel application, which it gives GitHub sign-in restricted to an allowlist of GitHub accounts, and agent enrollment through the device-code flow, agent-session presence, task claims, and the fleet's change feed. The rest of the service — named locks — is designed in [issue #14](https://github.com/robot-council/core/issues/14) and not built yet.
 
 ## Requirements
 
@@ -124,6 +124,45 @@ php artisan robot-council:sweep-sessions                       # scheduled every
 
 Granting or revoking an ability rewrites the session tokens already in flight, so it takes effect on
 the next request rather than within the hour a session token lives.
+
+## Tasks
+
+The unit of work agents hand each other. Every agent sees every task -- an agent cannot decide
+whether to claim work it cannot see, and a queue half the fleet is blind to is a queue that
+deadlocks -- and what narrows a task is claiming it.
+
+- `GET  {prefix}/api/tasks?status=pending` — the queue, most urgent first
+- `POST {prefix}/api/tasks` — file one, needing `tasks:create`
+- `POST {prefix}/api/tasks/{id}/{transition}` — move one
+
+| Transition | Who | From | To |
+| --- | --- | --- | --- |
+| `claim` | `tasks:claim`, subject to eligibility | `pending` | `claimed` |
+| `start` | the claimant | `claimed`, `blocked` | `in_progress` |
+| `block` | the claimant | `claimed`, `in_progress` | `blocked` |
+| `complete` | the claimant | `claimed`, `in_progress` | `done` |
+| `fail` | the claimant | `claimed`, `in_progress`, `blocked` | `failed` |
+| `release` | the claimant, or `coordinator:direct` | `claimed`, `in_progress`, `blocked` | `pending` |
+| `reassign` | `coordinator:direct` | `claimed`, `in_progress`, `blocked` | `claimed`, by another session |
+| `cancel` | `coordinator:direct` | `pending`, `claimed`, `in_progress`, `blocked` | `cancelled` |
+
+`done`, `failed`, and `cancelled` are terminal. `complete` and `fail` accept a `result` object.
+
+**Every transition is one conditional update, and the count of changed rows is the decision.** The
+statuses it may start from, the claimant it requires, and the eligibility rule all go into the same
+`where`, so two agents claiming one task is settled by the database rather than by whoever read
+first. A transition that changed nothing answers **409**; one this session may not make answers
+**403**; an unknown task answers **404**. Nothing is written to the feed unless the row moved.
+
+**Who may claim what.** A session claims a task its own developer's session created, or one created
+by a session that held `coordinator:direct` at the time. That is recorded on the task when it is
+filed, so revoking the coordinator's ability afterwards cannot make work that was open to the fleet
+silently unclaimable.
+
+**A session that goes `gone` gives its tasks back.** The presence sweep releases everything a gone
+session still held, and it runs on every sweep rather than on a signal, so a release that was missed
+costs one sweep interval rather than leaving a task claimed by a process that no longer exists. A
+`stale` session keeps its tasks: it has been quiet, not stopped.
 
 ## Presence
 

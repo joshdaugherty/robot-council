@@ -1,0 +1,136 @@
+<?php
+
+declare(strict_types=1);
+
+namespace RobotCouncil\Http\Controllers;
+
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
+use RobotCouncil\Access\Ability;
+use RobotCouncil\Access\Tokens;
+use RobotCouncil\Http\Principal;
+use RobotCouncil\Http\Rules\BoundedMeta;
+use RobotCouncil\Models\AgentSession;
+use RobotCouncil\Models\TaskTransition;
+use RobotCouncil\Support\TaskList;
+use RobotCouncil\Support\TaskOutcome;
+use RobotCouncil\Support\Tasks;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+
+/**
+ * Moves a task from one state to another.
+ *
+ * One endpoint for all eight transitions, because the rules that separate them are the same rules
+ * the write enforces, and they live on `TaskTransition`. Splitting them across eight controllers
+ * would put the ability each needs in a middleware declaration and the statuses each may start from
+ * in a query, where the two could drift apart -- and the route's regex is built from the enum, so a
+ * transition that does not exist is a 404 from the router.
+ *
+ * The ability check is here rather than in `RequireAbility` for the one transition that has two
+ * ways in: a release is allowed to the session holding the task, *or* to a coordinator, and no
+ * single ability names that.
+ */
+final class TransitionTaskController
+{
+    /**
+     * Attempt the transition.
+     *
+     * @param  Request  $request  The incoming request.
+     * @param  string  $task  The task's ID, from the route.
+     * @param  string  $transition  The transition's name, from the route.
+     * @param  Tasks  $tasks  The task store.
+     * @return JsonResponse What came of it.
+     *
+     * @throws AccessDeniedHttpException When the session holds neither way in.
+     */
+    public function __invoke(Request $request, string $task, string $transition, Tasks $tasks): JsonResponse
+    {
+        // The router's constraint already refused anything else, so this cannot be null in a
+        // request that reached here -- but a route registered by hand elsewhere could
+        $move = TaskTransition::tryFrom($transition);
+
+        if (! $move instanceof TaskTransition) {
+            throw new AccessDeniedHttpException;
+        }
+
+        $session = Principal::agentSession($request);
+        $token = $session->currentAccessToken();
+
+        $asCoordinator = Tokens::allows($token, Ability::CoordinatorDirect);
+
+        // A coordinator's own transitions need the coordinator's ability; a claimant's need
+        // `tasks:claim`, unless this is the one a coordinator may also do
+        $permitted = Tokens::allows($token, $move->ability())
+            || ($move->coordinatorMayOverride() && $asCoordinator);
+
+        if (! $permitted) {
+            throw new AccessDeniedHttpException;
+        }
+
+        $assignee = $move === TaskTransition::Reassign ? $this->assignee($request) : null;
+
+        $outcome = $tasks->transition((int) $task, $move, $session, $asCoordinator, $assignee, $this->result($request, $move));
+
+        return new JsonResponse([
+            'task_id' => (int) $task,
+            'status' => $outcome === TaskOutcome::Applied ? $move->to()->value : null,
+            'applied' => $outcome === TaskOutcome::Applied,
+        ], $outcome->status());
+    }
+
+    /**
+     * What the agent reports about a task it has finished.
+     *
+     * @param  Request  $request  The incoming request.
+     * @param  TaskTransition  $move  The transition being attempted.
+     * @return array<array-key, mixed>|null The result, where this transition records one.
+     */
+    private function result(Request $request, TaskTransition $move): ?array
+    {
+        if (! $move->takesAResult()) {
+            return null;
+        }
+
+        $request->validate([
+            'result' => ['sometimes', 'nullable', 'array', new BoundedMeta],
+        ]);
+
+        $result = $request->input('result');
+
+        return \is_array($result) && $result !== [] ? $result : null;
+    }
+
+    /**
+     * The session a reassignment hands the task to.
+     *
+     * A session that has gone, or one that never existed, is a 422 rather than a 404: the request
+     * is well formed and names something real-looking, and what is wrong is the value rather than
+     * the route.
+     *
+     * @param  Request  $request  The incoming request.
+     * @return AgentSession The session to hand the task to.
+     *
+     * @throws ValidationException When no session that can be worked carries that ID.
+     */
+    private function assignee(Request $request): AgentSession
+    {
+        $request->validate([
+            'session_id' => ['required', 'integer', 'min:1'],
+
+            // Accepted so a coordinator can say why, and bounded like every other structure a
+            // client may attach
+            'meta' => ['sometimes', 'array', new BoundedMeta],
+        ]);
+
+        $session = AgentSession::query()->whereKey($request->integer('session_id'))->first();
+
+        if (! TaskList::canBeAssigned($session) || ! $session instanceof AgentSession) {
+            throw ValidationException::withMessages([
+                'session_id' => 'The session_id field must name a session that can still be worked.',
+            ]);
+        }
+
+        return $session;
+    }
+}

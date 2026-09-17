@@ -19,17 +19,21 @@ use Illuminate\Support\Facades\Route;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Http\Controllers\AgentHeartbeatController;
 use RobotCouncil\Http\Controllers\AgentSessionController;
+use RobotCouncil\Http\Controllers\CreateTaskController;
 use RobotCouncil\Http\Controllers\DeviceCodeController;
 use RobotCouncil\Http\Controllers\DeviceTokenController;
 use RobotCouncil\Http\Controllers\FleetFeedController;
+use RobotCouncil\Http\Controllers\ListTasksController;
 use RobotCouncil\Http\Controllers\PostDirectiveController;
 use RobotCouncil\Http\Controllers\PostNarrationController;
 use RobotCouncil\Http\Controllers\SessionEndController;
 use RobotCouncil\Http\Controllers\SessionRenewController;
 use RobotCouncil\Http\Controllers\SessionStartController;
+use RobotCouncil\Http\Controllers\TransitionTaskController;
 use RobotCouncil\Http\Middleware\EnsureAgentSession;
 use RobotCouncil\Http\Middleware\EnsureInstallation;
 use RobotCouncil\Http\Middleware\RequireAbility;
+use RobotCouncil\Models\TaskTransition;
 use RobotCouncil\RobotCouncilServiceProvider;
 
 Route::post('device/code', DeviceCodeController::class)
@@ -81,4 +85,22 @@ Route::middleware([EnsureAgentSession::class, 'throttle:'.RobotCouncilServicePro
         Route::post('directives', PostDirectiveController::class)
             ->middleware(RequireAbility::class.':'.Ability::CoordinatorDirect->value)
             ->name('directives.store');
+
+        // Every agent sees every task: an agent cannot decide whether to claim work it cannot see,
+        // and a queue half the fleet is blind to is a queue that deadlocks. What narrows a task is
+        // claiming it, and #16's eligibility rule rides in the claim's own conditional update.
+        Route::get('tasks', ListTasksController::class)->name('tasks.index');
+
+        Route::post('tasks', CreateTaskController::class)
+            ->middleware(RequireAbility::class.':'.Ability::TasksCreate->value)
+            ->name('tasks.store');
+
+        // All eight transitions through one route, whose constraint is built from the enum, so an
+        // unknown one is a 404 from the router. The ability each needs is on `TaskTransition` and
+        // checked in the controller rather than declared here: `release` is allowed to the session
+        // holding the task *or* to a coordinator, and no single ability names that.
+        Route::post('tasks/{task}/{transition}', TransitionTaskController::class)
+            ->where('task', RobotCouncilServiceProvider::ROUTE_ID)
+            ->where('transition', implode('|', TaskTransition::values()))
+            ->name('tasks.transition');
     });

@@ -50,6 +50,51 @@ enum FleetEventType: string
     case SessionGone = 'session.gone';
 
     /**
+     * A task was created and is waiting for somebody to claim it.
+     */
+    case TaskCreated = 'task.created';
+
+    /**
+     * A session took a pending task.
+     */
+    case TaskClaimed = 'task.claimed';
+
+    /**
+     * A session began work on a task it holds.
+     */
+    case TaskStarted = 'task.started';
+
+    /**
+     * A task is waiting on something outside its session's control.
+     */
+    case TaskBlocked = 'task.blocked';
+
+    /**
+     * A task finished successfully.
+     */
+    case TaskCompleted = 'task.completed';
+
+    /**
+     * A task finished unsuccessfully.
+     */
+    case TaskFailed = 'task.failed';
+
+    /**
+     * A task went back to the queue, by its claimant, a coordinator, or the presence sweep.
+     */
+    case TaskReleased = 'task.released';
+
+    /**
+     * A coordinator moved a held task to another session.
+     */
+    case TaskReassigned = 'task.reassigned';
+
+    /**
+     * A coordinator called a task off for good.
+     */
+    case TaskCancelled = 'task.cancelled';
+
+    /**
      * Whether an event of this type is only visible to some readers.
      *
      * @return bool True for narration, which #29 restricts, and false for everything else.

@@ -8,7 +8,6 @@ use Illuminate\Contracts\Database\Eloquent\Builder;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\FleetEvent;
 use RobotCouncil\Models\FleetEventType;
-use RobotCouncil\Models\GithubIdentity;
 
 /**
  * Reads the change feed for one agent session, applying the visibility rule decided in #29.
@@ -27,6 +26,11 @@ final class FleetFeed
      * The most events one read returns, whatever the caller asks for.
      */
     public const int MAX_PAGE = 200;
+
+    /**
+     * @param  AgentLogins  $logins  Who each session belongs to, as the fleet reads provenance.
+     */
+    public function __construct(private readonly AgentLogins $logins) {}
 
     /**
      * Read the events after a cursor that this session may see.
@@ -78,7 +82,7 @@ final class FleetFeed
             ->orderBy('id')
             ->get();
 
-        $logins = $this->loginsFor($events->pluck('agent_session_id')->all());
+        $logins = $this->logins->forSessions($events->pluck('agent_session_id')->all());
 
         /** @var list<array<string, mixed>> $described */
         $described = $events->map(fn (FleetEvent $event): array => $this->describe($event, $logins))->values()->all();
@@ -111,42 +115,5 @@ final class FleetFeed
                 'coordinator_direct' => $event->posted_with_coordinator,
             ],
         ];
-    }
-
-    /**
-     * The GitHub login behind each of a set of agent sessions.
-     *
-     * Resolved in two queries rather than two per event, because a full page of narration would
-     * otherwise be four hundred round trips.
-     *
-     * @param  array<mixed>  $sessionIds  The session IDs the page referred to, some of them null.
-     * @return array<int, string> Logins, keyed by agent session ID.
-     */
-    private function loginsFor(array $sessionIds): array
-    {
-        $ids = array_values(array_unique(array_filter($sessionIds, is_int(...))));
-
-        if ($ids === []) {
-            return [];
-        }
-
-        $sessions = AgentSession::query()->whereKey($ids)->get(['id', 'user_id']);
-
-        $byUser = GithubIdentity::query()
-            ->whereIn('user_id', $sessions->pluck('user_id')->unique()->all())
-            ->get(['user_id', 'github_login'])
-            ->pluck('github_login', 'user_id');
-
-        $logins = [];
-
-        foreach ($sessions as $session) {
-            $login = $byUser->get($session->user_id);
-
-            if (\is_string($login)) {
-                $logins[$session->id] = $login;
-            }
-        }
-
-        return $logins;
     }
 }

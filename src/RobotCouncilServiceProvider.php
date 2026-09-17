@@ -30,6 +30,7 @@ use RobotCouncil\Support\Contracts\DrawsUserCodes;
 use RobotCouncil\Support\Credentials;
 use RobotCouncil\Support\HostUsers;
 use RobotCouncil\Support\SessionReleases;
+use RobotCouncil\Support\Tasks;
 use RobotCouncil\Support\UserCodes;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
@@ -149,10 +150,30 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
     public function packageBooted(): void
     {
         $this->registerMigrations();
+        $this->registerReleases();
         $this->registerRateLimits();
         $this->registerRoutes();
         $this->registerAbilities();
         $this->registerSchedule();
+    }
+
+    /**
+     * Register what the presence sweep releases when a session has gone.
+     *
+     * A step rather than a `SessionGone` listener, and the two are not equivalent. The event fires
+     * once, so anything that swallows it -- a worker that died mid-job, a listener that threw --
+     * leaves a task held by a process that no longer exists, with nothing to notice. A step that
+     * runs on every sweep finds whatever is still held, so the worst case is one sweep interval
+     * rather than forever.
+     *
+     * Resolved when the step runs rather than now, because this is registered at boot and the store
+     * it needs depends on configuration a host may still be changing.
+     */
+    private function registerReleases(): void
+    {
+        $this->app->make(SessionReleases::class)->register(function (): void {
+            $this->app->make(Tasks::class)->releaseOrphaned();
+        });
     }
 
     /**

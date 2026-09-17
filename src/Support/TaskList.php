@@ -1,0 +1,185 @@
+<?php
+
+declare(strict_types=1);
+
+namespace RobotCouncil\Support;
+
+use Illuminate\Contracts\Database\Eloquent\Builder;
+use RobotCouncil\Models\AgentSession;
+use RobotCouncil\Models\Task;
+use RobotCouncil\Models\TaskStatus;
+
+/**
+ * Reads tasks for an agent session.
+ *
+ * **Every agent sees that every task exists. Not every agent sees what it says.** A task's row --
+ * its id, status, priority, project and provenance -- is fleet state, and withholding it would give
+ * a queue half the fleet is blind to. Its title, description, payload and result are something else:
+ * they are instructions, and task content is untrusted input to an agent that may have shell access.
+ * #29 settled that question for narration, and this applies the same answer: content reaches the
+ * reader's own developer's work, work a coordinator opened to the fleet, and a reader holding
+ * `coordinator:direct`. Everyone else sees the row and not the words.
+ *
+ * Without that split a session holding only `tasks:create` -- the narrowest ability there is -- could
+ * put arbitrary text in front of every agent in the fleet, which is exactly what #29 stops it doing
+ * through narration.
+ *
+ * **The page is a cursor, not a window.** Ordering by priority with a plain limit would make the
+ * tail of the queue permanently unreachable: a hundred tasks at the top priority, which one token
+ * can file in a minute, and nothing filed afterwards could ever be seen. `FleetFeed` pages the ID
+ * space for the same reason, and nothing prunes either table.
+ *
+ * Provenance travels with every task, derived on read and never taken from what a creator claimed.
+ */
+final class TaskList
+{
+    /**
+     * The most tasks one read returns, whatever the caller asks for.
+     */
+    public const int MAX_PAGE = 100;
+
+    /**
+     * @param  AgentLogins  $logins  Who each session belongs to.
+     */
+    public function __construct(private readonly AgentLogins $logins) {}
+
+    /**
+     * Read a page of tasks, most urgent first, from a cursor.
+     *
+     * The cursor is the last row returned, as the pair the ordering is built on. Paging on that
+     * pair rather than on an offset means a task filed or claimed between two reads cannot make a
+     * reader skip a row or see one twice.
+     *
+     * @param  TaskStatus|null  $status  The status to filter by, or null for every status.
+     * @param  int  $limit  How many to return.
+     * @param  AgentSession  $reader  The session doing the reading.
+     * @param  bool  $asCoordinator  Whether the reader holds `coordinator:direct`.
+     * @param  array{priority: int, id: int}|null  $after  The last row the reader has seen.
+     * @return array{tasks: list<array<string, mixed>>, cursor: array{priority: int, id: int}|null}
+     *                                                                                              The page, and where to read from next.
+     */
+    public function page(
+        ?TaskStatus $status,
+        int $limit,
+        AgentSession $reader,
+        bool $asCoordinator,
+        ?array $after = null
+    ): array {
+        $tasks = Task::query()
+            ->when($status instanceof TaskStatus, fn (Builder $query) => $query->where('status', $status?->value))
+            ->when($after !== null, function (Builder $query) use ($after): void {
+                $priority = $after['priority'] ?? 0;
+                $id = $after['id'] ?? 0;
+
+                // The keyset predicate for `priority` descending, `id` ascending: everything less
+                // urgent, plus everything of equal urgency filed later
+                $query->where(fn (Builder $page) => $page
+                    ->where('priority', '<', $priority)
+                    ->orWhere(fn (Builder $tie) => $tie
+                        ->where('priority', $priority)
+                        ->where('id', '>', $id)));
+            })
+
+            // The queue's order: the most urgent first, and among equals the oldest, so a task
+            // nobody claims does not sink under everything filed after it
+            ->orderByDesc('priority')
+            ->orderBy('id')
+            ->limit(max(1, min($limit, self::MAX_PAGE)))
+            ->get();
+
+        $logins = $this->logins->forSessions([
+            ...$tasks->pluck('created_by')->all(),
+            ...$tasks->pluck('claimed_by')->all(),
+        ]);
+
+        $last = $tasks->last();
+
+        return [
+            'tasks' => array_values(array_map(
+                fn (Task $task): array => $this->describe($task, $logins, $reader, $asCoordinator),
+                $tasks->all()
+            )),
+            'cursor' => $last instanceof Task ? ['priority' => $last->priority, 'id' => $last->id] : null,
+        ];
+    }
+
+    /**
+     * One task as an agent sees it.
+     *
+     * @param  Task  $task  The task.
+     * @param  array<int, string>  $logins  GitHub logins, keyed by agent session ID.
+     * @param  AgentSession  $reader  The session doing the reading.
+     * @param  bool  $asCoordinator  Whether the reader holds `coordinator:direct`.
+     * @return array<string, mixed> The task.
+     */
+    private function describe(Task $task, array $logins, AgentSession $reader, bool $asCoordinator): array
+    {
+        // The same audience #16 decided may act on this task, plus a coordinator, which is the same
+        // pair #29 uses for narration. Everyone else is told the task exists and not what it says.
+        $readable = $asCoordinator || $task->isClaimableBy($reader);
+
+        return [
+            'id' => $task->id,
+            'parent_task_id' => $task->parent_task_id,
+            'title' => $readable ? $task->title : null,
+            'description' => $readable ? $task->description : null,
+            'status' => $task->status->value,
+            'priority' => $task->priority,
+            'payload' => $readable ? $task->payload : null,
+            'result' => $readable ? $task->result : null,
+            'readable' => $readable,
+            'project_id' => $task->project_id,
+            'created_at' => $task->created_at?->toIso8601String(),
+            'claimed_at' => $task->claimed_at?->toIso8601String(),
+
+            // Derived by the server on every read. `coordinator_direct` is what the creating
+            // session held at the time, which is also what decides who may claim this.
+            'created_by' => $this->actor($task->created_by, $logins, $task->created_with_coordinator),
+            'claimed_by' => $this->actor($task->claimed_by, $logins, null),
+        ];
+    }
+
+    /**
+     * One session, as provenance.
+     *
+     * @param  int|null  $sessionId  The session, when there is one.
+     * @param  array<int, string>  $logins  GitHub logins, keyed by agent session ID.
+     * @param  bool|null  $coordinator  Whether the session held `coordinator:direct`, where that is
+     *                                  recorded.
+     * @return array<string, mixed>|null The actor, or null where there is none.
+     */
+    private function actor(?int $sessionId, array $logins, ?bool $coordinator): ?array
+    {
+        if ($sessionId === null) {
+            return null;
+        }
+
+        $actor = [
+            'session_id' => $sessionId,
+            'github_login' => $logins[$sessionId] ?? null,
+        ];
+
+        if ($coordinator !== null) {
+            $actor['coordinator_direct'] = $coordinator;
+        }
+
+        return $actor;
+    }
+
+    /**
+     * Whether a session may be handed a task.
+     *
+     * A session that has gone is refused: it will never make another request, so a task assigned to
+     * one would sit held until the sweep released it. A `stale` session is accepted, because it is
+     * a process that has been quiet rather than one that has stopped -- refusing it would make an
+     * agent unable to receive work for as long as its build runs, and if it really has died the
+     * sweep releases the task soon enough.
+     *
+     * @param  AgentSession|null  $session  The proposed assignee.
+     * @return bool True when the session can be handed work.
+     */
+    public static function canBeAssigned(?AgentSession $session): bool
+    {
+        return $session instanceof AgentSession && ! $session->hasGone();
+    }
+}

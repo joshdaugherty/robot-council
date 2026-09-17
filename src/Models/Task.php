@@ -1,0 +1,130 @@
+<?php
+
+declare(strict_types=1);
+
+namespace RobotCouncil\Models;
+
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
+
+/**
+ * One unit of work agents hand each other.
+ *
+ * Nothing here decides a transition. Every state change is a conditional update written by
+ * `Support\Tasks`, so this model is what a task *is* rather than what may happen to it: the rules
+ * live in `TaskTransition`, and the write that enforces them is the same statement that performs
+ * them.
+ *
+ * @property int $id
+ * @property int|null $parent_task_id
+ * @property string $title
+ * @property string|null $description
+ * @property TaskStatus $status
+ * @property int $priority
+ * @property array<string, mixed>|null $payload
+ * @property array<string, mixed>|null $result
+ * @property int|null $claimed_by
+ * @property Carbon|null $claimed_at
+ * @property int|null $created_by
+ * @property string $user_id
+ * @property bool $created_with_coordinator
+ * @property string|null $project_id
+ * @property Carbon|null $created_at
+ * @property-read AgentSession|null $claimant
+ * @property-read AgentSession|null $creator
+ */
+#[Fillable([
+    'parent_task_id',
+    'title',
+    'description',
+    'status',
+    'priority',
+    'payload',
+    'result',
+    'claimed_by',
+    'claimed_at',
+    'created_by',
+    'user_id',
+    'created_with_coordinator',
+    'project_id',
+])]
+#[Table(name: 'robot_council_tasks')]
+final class Task extends Model
+{
+    /**
+     * The longest title a task may carry.
+     */
+    public const int MAX_TITLE = 255;
+
+    /**
+     * The longest description a task may carry.
+     */
+    public const int MAX_DESCRIPTION = 4000;
+
+    /**
+     * The highest priority a task may be given. Higher is more urgent.
+     */
+    public const int MAX_PRIORITY = 9;
+
+    /**
+     * The attribute casts.
+     *
+     * Public rather than protected, because Pest's `strict()` preset forbids protected methods in
+     * the package's namespaces, and PHP allows a subclass to widen a parent's visibility.
+     *
+     * @return array<string, string> The casts Eloquent applies to this model's attributes.
+     */
+    public function casts(): array
+    {
+        return [
+            'parent_task_id' => 'integer',
+            'status' => TaskStatus::class,
+            'priority' => 'integer',
+            'payload' => 'array',
+            'result' => 'array',
+            'claimed_by' => 'integer',
+            'claimed_at' => 'datetime',
+            'created_by' => 'integer',
+            'created_with_coordinator' => 'boolean',
+        ];
+    }
+
+    /**
+     * The session holding this task, while one does.
+     *
+     * @return BelongsTo<AgentSession, $this> The claimant.
+     */
+    public function claimant(): BelongsTo
+    {
+        return $this->belongsTo(AgentSession::class, 'claimed_by');
+    }
+
+    /**
+     * The session that created this task.
+     *
+     * @return BelongsTo<AgentSession, $this> The creator, which may have been deleted.
+     */
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(AgentSession::class, 'created_by');
+    }
+
+    /**
+     * Whether a session may claim this task, under #16.
+     *
+     * The same condition the claim's conditional update carries, in the form a diagnosis can read.
+     * Both are written from `user_id` and `created_with_coordinator` on this row, so a creating
+     * session that has since been deleted, or a coordinator's ability revoked since, changes
+     * neither answer.
+     *
+     * @param  AgentSession  $session  The session attempting the claim.
+     * @return bool True when the task is the session's developer's, or was created by a coordinator.
+     */
+    public function isClaimableBy(AgentSession $session): bool
+    {
+        return $this->user_id === $session->user_id || $this->created_with_coordinator;
+    }
+}

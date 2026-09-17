@@ -38,6 +38,46 @@ use function Orchestra\Testbench\default_migration_path;
 class TestCase extends Orchestra
 {
     /**
+     * The developer most tests act as.
+     *
+     * Declared rather than left to Pest's dynamic properties. A test closure is bound to the test
+     * case, so a property assigned in `beforeEach` is inferred there -- but a shared helper that
+     * takes the case as a parameter sees only what the class declares, and everything it reaches
+     * for arrives as `mixed`. Declaring the fixtures is what lets those helpers be written at all.
+     */
+    public User $developer;
+
+    /**
+     * The installation most machine tests authenticate as.
+     */
+    public Installation $installation;
+
+    /**
+     * That installation's plaintext credential.
+     */
+    public string $credential;
+
+    /**
+     * The agent session most agent tests authenticate as.
+     */
+    public AgentSession $session;
+
+    /**
+     * That session's plaintext token.
+     */
+    public string $token;
+
+    /**
+     * A second session holding `coordinator:direct`, for the tests that need one.
+     */
+    public AgentSession $coordinatorSession;
+
+    /**
+     * That coordinator session's plaintext token.
+     */
+    public string $coordinatorToken;
+
+    /**
      * Directories created for the current test, removed when it finishes.
      *
      * @var list<string> Absolute paths outside the repository.

@@ -8,7 +8,7 @@ use JoshDaugherty\RobotCouncil\Commands\RobotCouncilCommand;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 
-class RobotCouncilServiceProvider extends PackageServiceProvider
+final class RobotCouncilServiceProvider extends PackageServiceProvider
 {
     public function configurePackage(Package $package): void
     {

@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use Pest\Rector\Set\PestSetList;
 use Rector\CodeQuality\Rector\ClassMethod\LocallyCalledStaticMethodToNonStaticRector;
+use Rector\CodingStyle\Rector\ClassMethod\MakeInheritedMethodVisibilitySameAsParentRector;
 use Rector\Config\RectorConfig;
 use Rector\DeadCode\Rector\ClassMethod\RemoveDuplicatedReturnSelfDocblockRector;
 use Rector\DeadCode\Rector\ClassMethod\RemoveEmptyClassMethodRector;
@@ -48,6 +50,13 @@ return RectorConfig::configure()
         // `@var` pinning a value that arrives untyped, and `@return $this` beside `: static`.
         RemoveUselessVarTagRector::class,
         RemoveDuplicatedReturnSelfDocblockRector::class,
+
+        // Pest's `strict()` arch preset forbids protected methods, and PHP allows a subclass to
+        // widen one, so the facade declares `getFacadeAccessor()` public. This rule would narrow it
+        // back to the parent's `protected`; it still applies everywhere else.
+        MakeInheritedMethodVisibilitySameAsParentRector::class => [
+            __DIR__.'/src/Facades/RobotCouncil.php',
+        ],
     ])
     ->withPreparedSets(
         deadCode: true,
@@ -61,6 +70,9 @@ return RectorConfig::configure()
     ->withPhpSets()
     // The Laravel sets for the installed `laravel/framework` version.
     ->withComposerBased(laravel: true)
+    // Pest's own rules for test code: idiomatic expectations, and no leftover `->only()` or debug
+    // expectations. They match Pest calls only, so they leave `src/` alone.
+    ->withSets([PestSetList::CODING_STYLE])
     // Promote inline fully qualified class names to `use` imports, leaving global short classes
     // alone. Pint owns removing unused imports, because Rector's removal does not treat a class
     // named only inside a docblock `{@see}` tag as used.

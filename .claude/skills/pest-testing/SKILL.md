@@ -23,11 +23,12 @@ and `vendor/pestphp/pest-plugin-arch/src`. For prose documentation use
 
 - Tests live directly in `tests/` as `*Test.php` files (`phpunit.xml.dist` defines one suite over
   `tests`). There is no `Feature/` / `Unit/` split yet.
-- `tests/Pest.php` does `uses(TestCase::class)->in(__DIR__)`, so every test file runs on
+- `tests/Pest.php` does `pest()->extend(TestCase::class)->in(__DIR__)`, so every test file runs on
   `JoshDaugherty\RobotCouncil\Tests\TestCase`, which extends `Orchestra\Testbench\TestCase` and
   registers `RobotCouncilServiceProvider`. The package is booted inside a Testbench application
   in every test; `$this->app`, facades, and `$this->artisan()` are available.
-- `tests/ArchTest.php` holds the architecture tests (currently: no `dd`, `dump`, or `ray`).
+- `tests/ArchTest.php` holds the architecture tests: Pest's `php()`, `security()`, and `strict()`
+  presets, applied to the package's namespaces but not to `tests/`.
 - Do NOT remove tests without approval.
 
 ### Creating Tests
@@ -148,9 +149,14 @@ arch('commands extend the framework command')
     ->toExtend('Illuminate\Console\Command');
 ```
 
-Pest also ships presets (`arch()->preset()->php()`, `->security()`, `->laravel()`, `->strict()`;
-see `vendor/pestphp/pest/src/ArchPresets/`). Check what a preset asserts before adopting it — the
-`laravel` preset's expectations target the `App\` namespace, which this package does not have.
+`php()`, `security()`, and `strict()` are already applied; what they forbid is in
+`php-coding-standards` and `vendor/pestphp/pest/src/ArchPresets/`. The `laravel()` preset is not
+used: its expectations target the `App\` namespace, which this package does not have.
+
+Rector runs `pestphp/pest-plugin-rector`'s coding-style set over `tests/`, so test code is held to
+idiomatic Pest: it rewrites `expect($a === $b)->toBeTrue()` to `expect($a)->toBe($b)`, removes a
+leftover `->only()` or debug expectation, and prefers `pest()->extend()` over `uses()`. Run
+`composer refactor` after writing tests.
 
 Browser, smoke, and visual-regression testing need Pest plugins that are not installed here.
 

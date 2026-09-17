@@ -165,7 +165,7 @@ const DOMAINS = [
       'grep src/ for `Log::`, `logger(`, `report(`, and command output (`->info(`, `->line(`, `->table(`) — request payloads, tokens, or credentials written to logs or the console',
       'models in src/ — `$hidden` on token/secret/password columns; JSON responses, `toArray()`, or API resources that serialize them',
       'config/robot-council.php — shipped defaults must not contain real credentials; secrets belong in `env(` calls inside config; grep for `env(` outside config/ (it returns null once config is cached, which invites hard-coded fallbacks)',
-      'grep for `var_dump(`, `print_r(`, `var_export(`, `phpinfo(`, `debug_backtrace(` in src/ — tests/ArchTest.php forbids only `dd`/`dump`/`ray`',
+      'grep for output and debugging calls in src/ that the Pest php() and security() arch presets in tests/ArchTest.php do not list (see vendor/pestphp/pest/src/ArchPresets/); the presets do not cover database/migrations stubs or config/',
       'exception messages and validation errors that echo secrets, config values, or internal paths back to end users',
     ],
   },

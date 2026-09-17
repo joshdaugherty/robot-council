@@ -6,7 +6,7 @@ namespace JoshDaugherty\RobotCouncil\Commands;
 
 use Illuminate\Console\Command;
 
-class RobotCouncilCommand extends Command
+final class RobotCouncilCommand extends Command
 {
     public $signature = 'robot-council';
 

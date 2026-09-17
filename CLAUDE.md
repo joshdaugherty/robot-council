@@ -6,7 +6,7 @@ A **Laravel package** (`joshdaugherty/robot-council`), not an application. It wa
 
 - `src/` — namespace `JoshDaugherty\RobotCouncil\`. `RobotCouncilServiceProvider` is built on `spatie/laravel-package-tools` and is auto-discovered by consuming apps through `extra.laravel` in `composer.json`, along with the `RobotCouncil` facade alias.
 - `config/robot-council.php`, `database/migrations/*.php.stub`, `database/factories/`, `resources/views/` — what the provider can publish to a consuming app.
-- `tests/` — Pest on Orchestra Testbench. `tests/Pest.php` binds `tests/TestCase.php`, which registers the service provider; `tests/ArchTest.php` forbids `dd`, `dump`, and `ray`.
+- `tests/` — Pest on Orchestra Testbench. `tests/Pest.php` binds `tests/TestCase.php`, which registers the service provider; `tests/ArchTest.php` applies Pest's `php()`, `security()`, and `strict()` arch presets to the package's namespaces.
 - `.claude/rules/` loads into every session; `.claude/skills/` loads on demand.
 
 ## Commands
@@ -35,6 +35,7 @@ A **Laravel package** (`joshdaugherty/robot-council`), not an application. It wa
   - Nothing writes `CHANGELOG.md` automatically. A release adds its entry through an `Update CHANGELOG for vX.Y.Z` pull request before the tag (the `writing-release-notes` skill).
   - Dependabot opens weekly Composer and GitHub Actions update pull requests labeled `dependencies`. Nothing merges them automatically: take each through `pre-merge-check` like any other change.
 - **`main` is guarded by a ruleset**: a pull request, a successful `ci-passed`, and a branch that is up to date with `main`. Enforcement holds only while the ruleset is `active` (`gh api repos/joshdaugherty/robot-council/rulesets`); `pre-merge-check` covers what no check can.
+- **Package classes are `final`, with no `protected` methods.** Pest's `strict()` preset enforces it, so consumers cannot extend them; extension points have to be designed in. A method a parent declares `protected` (the facade's `getFacadeAccessor()`) is widened to `public`, with a per-file Rector skip (see `php-coding-standards`).
 - **The repository is owned by a personal account**, so GitHub issue types are unavailable. The issue templates declare them for the day it moves to an organization.
 - **Never disclose an exploitable vulnerability in a public issue or PR.** Use a draft security advisory, per the `security-audit` skill.
 

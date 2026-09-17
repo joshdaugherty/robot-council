@@ -46,7 +46,7 @@ holds for `gh pr edit <n> --body-file`.
 - **Every pull request runs the same checks.** `.github/workflows/ci.yml` runs on every pull
   request, with no path filters:
   - `tests` — `vendor/bin/pest --ci` on `ubuntu-latest` and `windows-latest` × PHP 8.5 and 8.4 ×
-    Laravel 13 and 12 × `prefer-lowest` and `prefer-stable`, with `fail-fast: false`, so every
+    Laravel 13 × `prefer-lowest` and `prefer-stable`, with `fail-fast: false`, so every
     cell reports.
   - `phpstan` — PHPStan on PHP 8.5.
   - `pint` — `vendor/bin/pint --test`, which fails on a style problem and fixes nothing. Run

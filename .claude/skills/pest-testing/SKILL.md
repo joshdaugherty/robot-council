@@ -1,6 +1,6 @@
 ---
 name: pest-testing
-description: "Use this skill for Pest PHP testing in this Laravel package (Pest 4 on Orchestra Testbench). Trigger whenever any test is being written, edited, fixed, or refactored — including fixing tests that broke after a code change, adding assertions, converting PHPUnit to Pest, adding datasets, and TDD workflows. Always activate when the user asks how to write something in Pest, mentions test files or the tests/ directory, tests/Pest.php, tests/TestCase.php, or tests/ArchTest.php, or needs architecture tests. Covers: test()/it()/expect() syntax, running tests with composer test or vendor/bin/pest, datasets, mocking and facade-mock cleanup, console command assertions, arch(), and the Testbench TestCase. Do not use for factories, migrations, service providers, or non-test PHP code."
+description: "Use this skill for Pest PHP testing in this Laravel package (Pest 5 on Orchestra Testbench). Trigger whenever any test is being written, edited, fixed, or refactored — including fixing tests that broke after a code change, adding assertions, converting PHPUnit to Pest, adding datasets, and TDD workflows. Always activate when the user asks how to write something in Pest, mentions test files or the tests/ directory, tests/Pest.php, tests/TestCase.php, or tests/ArchTest.php, or needs architecture tests. Covers: test()/it()/expect() syntax, running tests with composer test or vendor/bin/pest, datasets, mocking and facade-mock cleanup, console command assertions, arch(), and the Testbench TestCase. Do not use for factories, migrations, service providers, or non-test PHP code."
 license: MIT
 metadata:
   author: laravel
@@ -11,7 +11,7 @@ metadata:
 ## Documentation
 
 Read the installed version rather than recalling another one: `composer show pestphp/pest`
-(4.7.8 when this was written; `composer.lock` is not committed, so a fresh install can resolve
+(5.2.1 when this was written; `composer.lock` is not committed, so a fresh install can resolve
 differently) and its source under `vendor/pestphp/pest/src`, `vendor/pestphp/pest-plugin-laravel/src`,
 and `vendor/pestphp/pest-plugin-arch/src`. For prose documentation use
 [pestphp.com/docs](https://pestphp.com/docs) and, for the package test harness,
@@ -88,7 +88,7 @@ Import the mock function before use: `use function Pest\Laravel\mock;`
 
 ### A mocked facade is still installed during `afterEach` — never clean up through one
 
-In Pest 4.7.8, `Concerns/Testable.php`'s `tearDown()` calls the file's `afterEach` closure inside
+In Pest 5.2.1, `Concerns/Testable.php`'s `tearDown()` calls the file's `afterEach` closure inside
 a `try` and `parent::tearDown()` — Testbench's teardown, which flushes the application — in the
 `finally`. So a facade you swapped inside the test is still the facade root while your
 cleanup runs. Cleanup that calls back through it can silently do nothing, and the test still

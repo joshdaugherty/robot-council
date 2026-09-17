@@ -24,10 +24,10 @@ A **Laravel package** (`joshdaugherty/robot-council`), not an application. It wa
 
 ## Things that are easy to get wrong
 
-- **Every API must exist in the lowest supported Laravel version.** `composer.json` admits Laravel 12 and 13 (`illuminate/contracts`), but the development install resolves the newest. CI tests both, at `prefer-lowest` and `prefer-stable`.
+- **Every API must exist in the lowest supported Laravel version.** `composer.json` admits Laravel `^13.0` (`illuminate/contracts`), but the development install resolves the newest. CI's `prefer-lowest` cells cannot reach 13.0 either: `pestphp/pest-plugin-laravel` 5 requires at least `laravel/framework` 13.20, so releases below that are admitted but untested.
 - **`composer.lock` is gitignored.** Every CI run and every fresh install resolves dependencies anew, so an unchanged branch can go red later. Compare resolved versions before blaming a diff (see `measurement-parity`).
 - **CI is one workflow with one required check.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to `main`, with no path filters:
-  - `tests` runs `vendor/bin/pest --ci` on ubuntu and windows × PHP 8.5 and 8.4 × Laravel 13 and 12 × `prefer-lowest` and `prefer-stable`, with `fail-fast: false`.
+  - `tests` runs `vendor/bin/pest --ci` on ubuntu and windows × PHP 8.5 and 8.4 × Laravel 13 × `prefer-lowest` and `prefer-stable`, with `fail-fast: false`, on Pest 5 and PHPUnit 13.
   - `phpstan` runs PHPStan on PHP 8.5, and `pint` runs `vendor/bin/pint --test`, which **fails on a style problem instead of fixing it**. Run `vendor/bin/pint --dirty` before pushing.
   - `ci-passed` succeeds only when every other job succeeded. It is the one check the `main` ruleset requires.
   - Nothing writes `CHANGELOG.md` automatically. A release adds its entry through an `Update CHANGELOG for vX.Y.Z` pull request before the tag (the `writing-release-notes` skill).

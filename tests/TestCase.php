@@ -123,7 +123,7 @@ class TestCase extends Orchestra
         Artisan::call('migrate:fresh', [
             '--path' => [
                 default_migration_path(),
-                \dirname(__DIR__).'/database/migrations',
+                __DIR__.'/../database/migrations',
                 ...$paths,
             ],
             '--realpath' => true,

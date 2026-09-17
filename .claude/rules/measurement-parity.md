@@ -8,7 +8,7 @@ Before you compare a measurement against a prior one, such as a suite time, a CI
 
 1. **Open the baseline's harness and read it.** If a number came from a script or a workflow, that file is the specification. Here the CI test job is `tests` in `.github/workflows/ci.yml`, and it is not `composer test`. For each matrix cell it:
    - runs `setup-php` with a fixed extension list and `coverage: none`
-   - runs `composer require "laravel/framework:<13.*|12.*>" "orchestra/testbench:<11.*|10.*>" --no-update`
+   - runs `composer require "laravel/framework:13.*" "orchestra/testbench:11.*" --no-update`
    - runs `composer update --prefer-lowest|--prefer-stable --prefer-dist`
    - runs `vendor/bin/pest --ci`
 
@@ -17,9 +17,9 @@ Before you compare a measurement against a prior one, such as a suite time, a CI
 2. **Enumerate the parity checklist, and log it in the run.** For this package:
    - **PHP version and loaded extensions.** CI runs PHP 8.5 and 8.4 (PHPStan runs 8.5 only), with the listed extensions and **no coverage driver**. Local Herd PHP 8.4.23 loads **PCOV** (enabled, with `pcov.directory` resolved to `src`) plus extensions CI does not have. Compare `php -v` and `php -m` on both sides.
    - **Resolved dependency versions.** No `composer.lock` is committed. CI resolves dependencies on the day it runs, at `prefer-lowest` or `prefer-stable`, while your local `vendor/` reflects whatever your gitignored lock resolved at your last update. Compare CI's `List Installed Dependencies` step (`composer show -D`, direct dependencies only) with a local `composer show -D`. Transitive versions need a full `composer show`.
-   - **Laravel and Testbench.** CI pins `laravel/framework` 13.* with Testbench 11.*, or 12.* with 10.*. A local install resolved Laravel 13.32.0 and Testbench 11.2.0 as of 2026-09-17.
+   - **Laravel and Testbench.** CI pins `laravel/framework` 13.* with Testbench 11.*. A local install resolved Laravel 13.32.0 and Testbench 11.2.0 as of 2026-09-17.
    - **OS.** CI runs ubuntu and windows; local is macOS.
-   - **Pest flags and environment.** Read in Pest 4.7.8: under `--ci`, `->only()` no longer narrows the run, and `skipOnCI()` and `skipLocally()` flip on either `--ci` or the `CI` / `GITHUB_ACTIONS` variables that Actions sets. `phpunit.xml.dist` sets `executionOrder="random"`. The summary prints `Random Order Seed:`, and `--random-order-seed=<n>` repeats that order.
+   - **Pest flags and environment.** Read in Pest 5.2.1: under `--ci`, `->only()` no longer narrows the run, and `skipOnCI()` and `skipLocally()` flip on either `--ci` or the mere presence of `CI`, `GITHUB_ACTIONS` (both set by Actions), or 17 other CI variables. `phpunit.xml.dist` sets `executionOrder="random"`. The summary prints `Random Order Seed:`, and `--random-order-seed=<n>` repeats that order.
    - **The same commit, and the same bytes under `vendor/`** (step 3).
    - **A quiet machine**, checked per [`long-running-commands`](long-running-commands.md).
 
@@ -33,7 +33,7 @@ Before you compare a measurement against a prior one, such as a suite time, a CI
 
 5. **Know which flags change the workload rather than observe it.**
    - `--coverage` (`composer test-coverage`) turns on collection through PCOV or Xdebug, and CI runs with no driver at all.
-   - `--mutate` refuses to run without a coverage driver, adds a coverage run, then re-runs tests for each mutant (read in `pestphp/pest-plugin-mutate` v4.0.1).
+   - `--mutate` refuses to run without a coverage driver, adds a coverage run, then re-runs tests for each mutant (read in `pestphp/pest-plugin-mutate` v5.0.2).
    - `--parallel` changes the process model.
 
    Never quote any of their wall times as a plain run's time. Coverage driver setup is [`pcov-setup`](../skills/pcov-setup/SKILL.md).

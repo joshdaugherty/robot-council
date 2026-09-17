@@ -187,18 +187,18 @@ an `extension=` line in Herd's Windows `php.ini`. Verify with
 
 - **Mutation run:** `vendor/bin/pest --mutate --path=src --class="JoshDaugherty\RobotCouncil\<Class>"`.
   There is no `composer mutate` script. The traps below were read from
-  `pestphp/pest-plugin-mutate` v4.0.1; `composer.lock` is not committed, so confirm the installed
+  `pestphp/pest-plugin-mutate` v5.0.2; `composer.lock` is not committed, so confirm the installed
   version with `composer show pestphp/pest-plugin-mutate`.
 - **Give it a scope.** Without `--path`, `--class`, `--everything`, or a `covers()` / `mutates()`
-  call in the tests, v4.0.1 prints an error and exits 1.
-- **Pass a relative `--path`, from the package root.** v4.0.1's `Support/FileFinder.php` prefixes
+  call in the tests, v5.0.2 prints an error and exits 1.
+- **Pass a relative `--path`, from the package root.** v5.0.2's `Support/FileFinder.php` prefixes
   any path that does not start with `DIRECTORY_SEPARATOR` with the current directory. On Windows a
   drive-letter absolute path does not start with `\`, so it is doubled into a path that does not
   exist → **0 files**. With no `--path`, the plugin uses the `<source>` directories PHPUnit reads
   from `phpunit.xml.dist`, which arrive as absolute paths, so `--class` alone hits this on Windows.
   On macOS absolute paths start with `/` and are unaffected, but `--path=src` works on both.
 - **From a linked git worktree**, a run reporting 0 files even with a relative `--path` was
-  observed in another repository; it has not been reproduced or explained against v4.0.1. `vendor/` is
+  observed in another repository; it has not been reproduced or explained against v5.0.2. `vendor/` is
   git-ignored, so a new worktree needs its own `composer install` first. If it still finds nothing,
   scope to a relative sub-path and a test file:
 

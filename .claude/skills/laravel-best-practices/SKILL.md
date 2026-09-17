@@ -10,7 +10,7 @@ metadata:
 
 Best practices for Laravel, organized as an index of rule files. Each rule file teaches what to do and why. For exact API syntax, inspect the installed framework under `vendor/laravel/framework` (or use `search-docs` where Laravel Boost is installed; it is not installed in this package).
 
-This is a package, not an application: `composer.json` allows more than one Laravel major, so an API is only safe to use if it exists in the **lowest** version that constraint admits, not just in the version installed for development.
+This is a package, not an application: `composer.json` admits a range of Laravel releases (`^13.20.0`), so an API is only safe to use if it exists in the **lowest** release that constraint admits, not just in the version installed for development. A method added in a later 13.x minor needs the constraint raised first.
 
 ## Consistency First
 

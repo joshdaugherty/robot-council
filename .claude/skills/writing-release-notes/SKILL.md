@@ -114,7 +114,7 @@ what makes it correct:
 5. **What's fixed** — the title opens with `Fix`/`Resolve`/`Repair`/`Prevent`/`Guard`/`Restore`/
    `Correct`/`Harden`/`Stop`/`Avoid`.
 6. **Maintenance and tooling** — the diff is confined to tooling (`.github/`, `.claude/`, `tests/`,
-   `workbench/`, `composer.json`, `phpstan.neon.dist`, `phpstan-baseline.neon`, `phpunit.xml.dist`,
+   `workbench/`, `composer.json`, `phpstan.neon.dist`, `phpstan-baseline.neon`, `phpunit.xml.dist`, `rector.php`,
    top-level dotfiles, `CHANGELOG.md`, `README.md`, `LICENSE.md`); or it adds more lines under
    `tests/` than elsewhere; or the title opens with a maintenance verb (`Refactor`, `Bump`,
    `Document`, …) or names tests, coverage, mutation, a skill, or a worktree.

@@ -19,6 +19,7 @@ A **Laravel package** (`joshdaugherty/robot-council`), not an application. It wa
 | Mutation | `vendor/bin/pest --mutate --path=src --class="JoshDaugherty\RobotCouncil\<Class>"` |
 | Static analysis | `composer analyse` (PHPStan with Larastan, level 5, `phpstan-baseline.neon`) |
 | Format | `vendor/bin/pint --dirty`; check only: `vendor/bin/pint --test` |
+| Refactor | `composer refactor` (Rector; see `rector.php`); check only: `composer test:refactor` |
 
 **There is no `php artisan`.** Testbench supplies a throwaway Laravel skeleton under `vendor/`, driven by `vendor/bin/testbench`. Its `make:*` generators write into that skeleton, not into this package, so create files by hand.
 
@@ -29,6 +30,7 @@ A **Laravel package** (`joshdaugherty/robot-council`), not an application. It wa
 - **CI is one workflow with one required check.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to `main`, with no path filters:
   - `tests` runs `vendor/bin/pest --ci` on ubuntu and windows × PHP 8.5 and 8.4 × Laravel 13 × `prefer-lowest` and `prefer-stable`, with `fail-fast: false`, on Pest 5 and PHPUnit 13.
   - `phpstan` runs PHPStan on PHP 8.5, and `pint` runs `vendor/bin/pint --test`, which **fails on a style problem instead of fixing it**. Run `vendor/bin/pint --dirty` before pushing.
+  - `rector` runs `vendor/bin/rector --dry-run`, which fails when Rector would change a file. Run `composer refactor` before pushing, and review what it changed.
   - `ci-passed` succeeds only when every other job succeeded. It is the one check the `main` ruleset requires.
   - Nothing writes `CHANGELOG.md` automatically. A release adds its entry through an `Update CHANGELOG for vX.Y.Z` pull request before the tag (the `writing-release-notes` skill).
   - Dependabot opens weekly Composer and GitHub Actions update pull requests labeled `dependencies`. Nothing merges them automatically: take each through `pre-merge-check` like any other change.

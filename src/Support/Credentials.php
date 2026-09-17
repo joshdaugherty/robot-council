@@ -8,8 +8,9 @@ use Illuminate\Contracts\Config\Repository;
 use Illuminate\Support\Carbon;
 
 /**
- * How long each credential lives, read from `robot-council.credentials` on every call so a host
- * that changes a lifetime does not have to restart anything.
+ * The package's bounded numbers, read from configuration on every call so a host that changes one
+ * does not have to restart anything: how long each credential lives, how long a session may go
+ * without contact, and how many attempts a minute each rate limit allows.
  *
  * Every value is bounded here rather than trusted from configuration, because a zero or negative
  * lifetime would issue a credential that is already expired, and an unbounded device-code lifetime
@@ -98,6 +99,50 @@ final class Credentials
     public function deviceCodeExpiry(): Carbon
     {
         return Carbon::now()->addSeconds($this->deviceCodeTtlSeconds());
+    }
+
+    /**
+     * How long a session may go without contact before the sweep marks it stale.
+     *
+     * @return int The threshold in minutes, at least one.
+     */
+    public function staleAfterMinutes(): int
+    {
+        return $this->bounded('presence.stale_after_minutes', 5);
+    }
+
+    /**
+     * How long a session may go without contact before the sweep marks it gone.
+     *
+     * Never shorter than the stale threshold. A host that inverted the two would otherwise have
+     * sessions that go gone without ever being stale, so the warning state -- the one an operator
+     * reads before anything is released -- would exist in the enum and never in the feed.
+     *
+     * @return int The threshold in minutes, at least the stale threshold.
+     */
+    public function goneAfterMinutes(): int
+    {
+        return max($this->bounded('presence.gone_after_minutes', 30), $this->staleAfterMinutes());
+    }
+
+    /**
+     * The contact time at or before which a session is stale.
+     *
+     * @return Carbon The cutoff.
+     */
+    public function staleCutoff(): Carbon
+    {
+        return Carbon::now()->subMinutes($this->staleAfterMinutes());
+    }
+
+    /**
+     * The contact time at or before which a session has gone.
+     *
+     * @return Carbon The cutoff.
+     */
+    public function goneCutoff(): Carbon
+    {
+        return Carbon::now()->subMinutes($this->goneAfterMinutes());
     }
 
     /**

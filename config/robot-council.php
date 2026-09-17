@@ -129,17 +129,45 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Presence
+    |--------------------------------------------------------------------------
+    |
+    | How long an agent session may go without contact, in minutes. Every
+    | authenticated agent request counts as contact, and a process with nothing
+    | else to send posts a heartbeat. A stale session still holds what it
+    | claimed and is active again on its next request; a session that has gone
+    | is final, its tokens are refused, and its claims and locks are released.
+    |
+    | `gone_after_minutes` is never shorter than `stale_after_minutes`: a
+    | smaller value is read as equal to it, so the warning state always exists.
+    | Both are measured by `robot-council:sweep-sessions`, so neither can fire
+    | sooner than the interval that command runs on.
+    |
+    */
+
+    'presence' => [
+        'stale_after_minutes' => (int) env('ROBOT_COUNCIL_PRESENCE_STALE_AFTER_MINUTES', 5),
+        'gone_after_minutes' => (int) env('ROBOT_COUNCIL_PRESENCE_GONE_AFTER_MINUTES', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Schedule
     |--------------------------------------------------------------------------
     |
-    | Whether the package adds its hourly prune of expired device codes to this
-    | application's schedule. Turn it off to run `robot-council:prune-device-codes`
-    | on another schedule, or from something other than Laravel's scheduler.
+    | Whether the package adds its own entries to this application's schedule:
+    | an hourly prune of expired device codes, and a sweep of agent-session
+    | presence every minute. Turn either off to run `robot-council:prune-device-codes`
+    | or `robot-council:sweep-sessions` on another schedule, or from something
+    | other than Laravel's scheduler. Turning the sweep off without running it
+    | elsewhere means no session is ever marked stale or gone, and whatever a
+    | dead process was holding stays held.
     |
     */
 
     'schedule' => [
         'prune_device_codes' => true,
+        'sweep_sessions' => true,
     ],
 
     /*

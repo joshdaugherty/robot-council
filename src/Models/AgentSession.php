@@ -35,7 +35,7 @@ use Laravel\Sanctum\PersonalAccessToken;
  * @property int $installation_id
  * @property string $user_id
  * @property AgentSessionStatus $status
- * @property Carbon|null $last_seen_at
+ * @property Carbon $last_seen_at
  * @property string|null $project_id
  * @property-read Installation $installation
  *
@@ -91,5 +91,15 @@ final class AgentSession extends Model implements AuthenticatableContract
     public function hasGone(): bool
     {
         return $this->status === AgentSessionStatus::Gone;
+    }
+
+    /**
+     * Determine whether nothing has been heard from the process for a while.
+     *
+     * @return bool True while the session is stale, which one request undoes.
+     */
+    public function hasGoneQuiet(): bool
+    {
+        return $this->status === AgentSessionStatus::Stale;
     }
 }

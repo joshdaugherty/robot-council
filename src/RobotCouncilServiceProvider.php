@@ -23,11 +23,13 @@ use RobotCouncil\Console\PruneDeviceCodesCommand;
 use RobotCouncil\Console\RevokeAbilityCommand;
 use RobotCouncil\Console\RevokeInstallationCommand;
 use RobotCouncil\Console\RevokeSessionCommand;
+use RobotCouncil\Console\SweepSessionsCommand;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\Installation;
 use RobotCouncil\Support\Contracts\DrawsUserCodes;
 use RobotCouncil\Support\Credentials;
 use RobotCouncil\Support\HostUsers;
+use RobotCouncil\Support\SessionReleases;
 use RobotCouncil\Support\UserCodes;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
@@ -92,6 +94,7 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
                 RevokeInstallationCommand::class,
                 RevokeSessionCommand::class,
                 PruneDeviceCodesCommand::class,
+                SweepSessionsCommand::class,
             ]);
     }
 
@@ -104,6 +107,10 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
         $this->registerGuards();
 
         $this->app->bind(DrawsUserCodes::class, UserCodes::class);
+
+        // A singleton, because it is a registry: a release step registered from another service
+        // provider has to be there for the sweep that runs later in the same process
+        $this->app->singleton(SessionReleases::class);
     }
 
     /**
@@ -348,10 +355,16 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
     }
 
     /**
-     * Schedule the prune of expired device codes.
+     * Schedule the prune of expired device codes and the presence sweep.
      *
      * Registered after the application has booted, because the scheduler is not bound until then,
      * and only in console, where the schedule is read.
+     *
+     * The sweep runs every minute and takes no overlap lock. It does not need one: every transition
+     * it writes is conditional on the state its read saw, so two sweeps running at once produce one
+     * transition and one event between them. A lock would add a failure mode strictly worse than
+     * the one it prevented, because a sweep killed mid-run leaves the lock held until it expires,
+     * and nothing is marked gone for as long as that lasts.
      */
     private function registerSchedule(): void
     {
@@ -359,14 +372,25 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
             return;
         }
 
-        // A host that runs no scheduler, or that prunes on its own terms, turns this off rather
-        // than finding an entry in `schedule:list` it cannot remove
-        if ($this->app->make(Repository::class)->get('robot-council.schedule.prune_device_codes', true) !== true) {
+        $config = $this->app->make(Repository::class);
+
+        // A host that runs no scheduler, or that prunes on its own terms, turns these off rather
+        // than finding entries in `schedule:list` it cannot remove
+        $prune = $config->get('robot-council.schedule.prune_device_codes', true) === true;
+        $sweep = $config->get('robot-council.schedule.sweep_sessions', true) === true;
+
+        if (! $prune && ! $sweep) {
             return;
         }
 
-        $this->app->booted(static function (): void {
-            Schedule::command(PruneDeviceCodesCommand::class)->hourly();
+        $this->app->booted(static function () use ($prune, $sweep): void {
+            if ($prune) {
+                Schedule::command(PruneDeviceCodesCommand::class)->hourly();
+            }
+
+            if ($sweep) {
+                Schedule::command(SweepSessionsCommand::class)->everyMinute();
+            }
         });
     }
 }

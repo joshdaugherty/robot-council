@@ -14,6 +14,7 @@ use RobotCouncil\Http\Principal;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\Installation;
 use RobotCouncil\Support\HostUsers;
+use RobotCouncil\Support\SessionPresence;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\UnauthorizedHttpException;
@@ -25,6 +26,10 @@ use Symfony\Component\HttpKernel\Exception\UnauthorizedHttpException;
  * guard returning somebody says nothing about what that somebody is. A session also inherits its
  * installation's standing, so revoking the installation stops every process running under it
  * without touching the sessions themselves.
+ *
+ * It is also where contact is recorded, because every route behind it is evidence the process is
+ * alive, and presence that depended on one endpoint being called would be presence that measured
+ * how a harness was written rather than whether it was running.
  */
 final class EnsureAgentSession
 {
@@ -32,11 +37,13 @@ final class EnsureAgentSession
      * @param  AuthFactory  $auth  The host application's authentication factory.
      * @param  Allowlist  $allowlist  The configured access lists.
      * @param  HostUsers  $hostUsers  The developer's GitHub identity.
+     * @param  SessionPresence  $presence  Where contact is recorded.
      */
     public function __construct(
         private readonly AuthFactory $auth,
         private readonly Allowlist $allowlist,
-        private readonly HostUsers $hostUsers
+        private readonly HostUsers $hostUsers,
+        private readonly SessionPresence $presence
     ) {}
 
     /**
@@ -78,6 +85,12 @@ final class EnsureAgentSession
         if ($githubId === null || ! $this->allowlist->admits($githubId)) {
             throw new AccessDeniedHttpException;
         }
+
+        // Every authenticated agent request is contact, which is what makes presence independent
+        // of any harness keeping a process running: a session that only ever reads the feed is as
+        // present as one that heartbeats. Recorded after the checks rather than before, so a
+        // credential that is refused never keeps a session alive.
+        $this->presence->sighted($session);
 
         $request->attributes->set(Principal::AGENT_SESSION, $session);
 

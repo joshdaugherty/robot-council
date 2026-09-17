@@ -33,21 +33,30 @@ use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Support\FleetEvents;
 
 /**
- * The last key the events table handed out.
+ * How many keys the events table has handed out.
  *
  * Read from the sequence rather than from the table, because that is the number that survives a
  * rollback, and surviving a rollback is exactly what makes an early-drawn key dangerous.
  *
- * @return int The sequence's last value.
+ * `is_called` is read alongside `last_value` and is not a detail: a sequence that has never been
+ * drawn from reports `last_value = 1, is_called = false`, and the first draw takes that 1 and sets
+ * `is_called`. Reading `last_value` alone therefore shows no movement across the very first insert
+ * -- which is how the control in the first test caught this being written the naive way.
+ *
+ * @return int The number of keys drawn so far.
  */
-function lastEventKey(): int
+function keysDrawn(): int
 {
     $sequence = (array) DB::selectOne("select pg_get_serial_sequence('robot_council_events', 'id') as name");
 
     $name = \is_string($sequence['name'] ?? null) ? $sequence['name'] : '';
 
     // The name comes from the server, not from input
-    $value = (array) DB::selectOne(sprintf('select last_value from %s', $name));
+    $value = (array) DB::selectOne(sprintf('select last_value, is_called from %s', $name));
+
+    if (($value['is_called'] ?? false) !== true) {
+        return 0;
+    }
 
     return \is_numeric($value['last_value'] ?? null) ? (int) $value['last_value'] : 0;
 }
@@ -63,13 +72,13 @@ it('draws no key while another connection holds the feed', function (): void {
         // The control. A normal write advances the sequence by exactly one, which proves the
         // sequence is the right thing to watch and that `record()` reaches an insert at all. If
         // this fails, every assertion below is meaningless rather than reassuring.
-        $before = lastEventKey();
+        $before = keysDrawn();
 
         $this->service(FleetEvents::class)->record(FleetEventType::Narration, null, 'the control');
 
-        expect(lastEventKey())->toBe($before + 1);
+        $held = keysDrawn();
 
-        $held = lastEventKey();
+        expect($held)->toBe($before + 1);
 
         // A SHARED lock, deliberately. An exclusive writer conflicts with it and must wait; two
         // shared locks would not conflict, so a package that downgraded its own lock would sail
@@ -86,7 +95,7 @@ it('draws no key while another connection holds the feed', function (): void {
         // The assertion the whole file exists for. The writer never reached its insert, so no key
         // was drawn -- and had the lock been taken after the insert, a key would have been drawn,
         // and would have stayed drawn through the rollback.
-        expect(lastEventKey())->toBe($held)
+        expect(keysDrawn())->toBe($held)
             ->and(FleetEvent::query()->where('body', 'the blocked writer')->exists())->toBeFalse();
     } finally {
         DB::statement('set lock_timeout = default');

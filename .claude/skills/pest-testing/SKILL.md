@@ -29,6 +29,13 @@ differently) and its source under `vendor/pestphp/pest/src` and
   in every test; `$this->app`, facades, and `$this->artisan()` are available.
 - `tests/ArchTest.php` holds the architecture tests: Pest's `php()`, `security()`, and `strict()`
   presets, applied to the package's namespaces but not to `tests/`.
+- A test that reads data a second connection commits goes in the `cross-connection` group
+  (`->group('cross-connection')`). `phpunit.xml.dist` excludes that group from every run that
+  does not name it, and only CI's `postgres` job runs it (`--group=cross-connection`), because
+  each connection to SQLite's in-memory database is a separate database. Such a test must not
+  use `RefreshDatabase` or `DatabaseTransactions`, whose wrapping transaction hides its rows from
+  the other connection, and it removes what it created in a `finally` block.
+  `tests/CrossConnectionTest.php` is the pattern.
 - Do NOT remove tests without approval.
 
 ### Creating Tests

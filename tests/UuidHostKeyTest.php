@@ -70,7 +70,7 @@ it('carries the UUID through enrollment, a session, and the allowlist re-check',
     $credential = stringValue($this->postJson(route('robot-council.device.token'), [
         'device_code' => $enrollment['device_code'],
         'code_verifier' => $enrollment['verifier'],
-    ])->assertCreated()->json('credential'));
+    ])->assertCreated()->json('token'));
 
     $installation = Installation::query()->sole();
 

@@ -6,6 +6,7 @@ namespace RobotCouncil\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use RobotCouncil\Support\Credentials;
 use RobotCouncil\Support\DeviceCodeError;
 use RobotCouncil\Support\DeviceCodes;
 use RobotCouncil\Support\Installations;
@@ -17,6 +18,11 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * The helper polls this until it gets a credential or a reason to stop, so every unfinished state
  * answers with the RFC 8628 section 3.5 error for it, and every one of them is HTTP 400.
+ *
+ * The success body is this package's own, not the RFC's. Its request already diverges deliberately
+ * -- a verifier rather than `grant_type` and `client_id` -- so no standard client can complete this
+ * exchange whatever the response is named, and `access_token` would promise OAuth affordances this
+ * service does not have: no scopes, no refresh token, no introspection, no server metadata.
  */
 final class DeviceTokenController
 {
@@ -26,10 +32,15 @@ final class DeviceTokenController
      * @param  Request  $request  The incoming request.
      * @param  DeviceCodes  $deviceCodes  The device-code store.
      * @param  Installations  $installations  The installation store.
+     * @param  Credentials  $credentials  The configured lifetimes.
      * @return JsonResponse The credential, or an RFC 8628 error.
      */
-    public function __invoke(Request $request, DeviceCodes $deviceCodes, Installations $installations): JsonResponse
-    {
+    public function __invoke(
+        Request $request,
+        DeviceCodes $deviceCodes,
+        Installations $installations,
+        Credentials $credentials
+    ): JsonResponse {
         $request->validate([
             'device_code' => ['required', 'string', 'max:255'],
 
@@ -53,11 +64,19 @@ final class DeviceTokenController
 
         return new JsonResponse([
             'installation_id' => $installation->getKey(),
-            'credential' => $issued->plainTextToken,
+            'token' => $issued->plainTextToken,
 
-            // What session tokens will carry. The credential itself carries only `sessions:start`.
+            // `abilities` is what THIS token carries, as it is on every other response. An
+            // installation credential carries one ability and cannot act on the fleet at all.
+            'abilities' => $issued->abilities,
+
+            // What the session tokens it starts will carry, which is the list the developer
+            // approved. Named apart from `abilities` because it describes a different token.
             'granted_abilities' => $installation->abilities(),
-            'expires_at' => $installation->expires_at->toIso8601String(),
+
+            // A duration rather than an instant, as on the session endpoints: a helper whose clock
+            // is wrong can still tell how long it has.
+            'expires_in' => $credentials->installationMaxAgeDays() * 24 * 60 * 60,
         ], Response::HTTP_CREATED);
     }
 }

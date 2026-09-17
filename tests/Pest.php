@@ -20,7 +20,7 @@ pest()->extend(TestCase::class)->in(__DIR__);
  * @param  list<string>  $requestedAbilities  The abilities to ask for.
  * @param  string  $verifier  The secret the helper keeps, whose hash is sent as the challenge.
  * @param  array<string, mixed>  $overrides  Fields to replace in the request body.
- * @return array{record: DeviceCode, device_code: string, verifier: string} What the helper holds.
+ * @return array{record: DeviceCode, device_code: string, verifier: string, response: array<string, mixed>} What the helper holds, and what it was told.
  */
 function requestDeviceCode(
     TestCase $case,
@@ -44,10 +44,14 @@ function requestDeviceCode(
 
     $deviceCode = stringValue($response->json('device_code'));
 
+    /** @var array<string, mixed> $body */
+    $body = (array) $response->json();
+
     return [
         'record' => DeviceCode::query()->where('device_code_hash', hash('sha256', $deviceCode))->sole(),
         'device_code' => $deviceCode,
         'verifier' => $verifier,
+        'response' => $body,
     ];
 }
 

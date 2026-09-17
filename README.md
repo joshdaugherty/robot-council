@@ -86,6 +86,26 @@ displays a short code, and the developer types it into a page while signed in.
 4. Each agent process calls `POST {prefix}/api/sessions` for a short-lived session token, and
    `POST {prefix}/api/sessions/{id}/renew` to replace it without a restart and without a human.
 
+Every response that carries a bearer token names it `token`, every expiry is an `expires_in` in
+seconds, and `abilities` always describes the token beside it. Where a response also names
+`granted_abilities`, that is what a *different* token will carry -- the sessions an installation
+credential will start.
+
+**This flow is device-code shaped, not [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)
+conformant**, and the differences are deliberate:
+
+- **The token endpoint takes a verifier**, not the RFC's `grant_type` and `client_id`. That verifier
+  is the whole reason a stolen `device_code` is useless, so no off-the-shelf device-flow client can
+  complete this exchange — which is also why the success responses use this package's own names
+  rather than `access_token`, a name that would promise OAuth affordances this service does not have.
+- **`slow_down` is not returned.** Poll throttling is out of scope for v1.
+- **`verification_uri_complete` is not returned.** There is no QR-code form of the verification URL
+  yet.
+
+The *error* bodies do follow RFC 8628 section 3.5 exactly: HTTP 400 with `authorization_pending`,
+`access_denied`, `expired_token`, or `invalid_grant`. Those names describe states this flow genuinely
+has, and nothing better exists for them.
+
 Abilities come from a fixed list — `tasks:create`, `tasks:claim`, `locks:acquire`, `events:post` —
 and `coordinator:direct`, which enrollment can never request. An admin grants it afterwards:
 

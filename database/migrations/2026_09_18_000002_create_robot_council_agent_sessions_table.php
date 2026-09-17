@@ -34,13 +34,26 @@ return new class extends Migration
             // argument for a narrow integer index has nothing to weigh against here.
             $table->string('user_id', 64)->index();
 
-            $table->string('status', 16)->index();
-            $table->timestamp('last_seen_at')->nullable();
+            $table->string('status', 16);
+
+            // `dateTime`, never `timestamp`, and never nullable. MySQL gives the first NOT NULL
+            // `TIMESTAMP` column in a table an implicit `DEFAULT CURRENT_TIMESTAMP ON UPDATE
+            // CURRENT_TIMESTAMP` while `explicit_defaults_for_timestamp` is off, which is the
+            // default on MySQL 5.7 and MariaDB before 10.10 -- so marking a session stale would
+            // silently move the contact time the sweep measures against, and restart the clock
+            // that decides when it goes. Nullable would be worse: a row with no contact time
+            // matches neither cutoff and could never go stale or gone at all.
+            $table->dateTime('last_seen_at');
 
             // Which repository or workspace the process is working in, when it says
             $table->string('project_id')->nullable();
 
             $table->timestamps();
+
+            // What the presence sweep reads on every run: the sessions in a given state that have
+            // not been heard from since a cutoff. Composite rather than one index on `status`,
+            // because the leftmost column serves a status-only lookup as well.
+            $table->index(['status', 'last_seen_at']);
         });
     }
 

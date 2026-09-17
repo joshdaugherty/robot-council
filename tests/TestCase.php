@@ -45,6 +45,13 @@ class TestCase extends Orchestra
     private array $temporaryDirectories = [];
 
     /**
+     * Configuration to apply while the application boots, rather than after it has.
+     *
+     * @var array<string, mixed> Values keyed by configuration key.
+     */
+    private array $bootConfiguration = [];
+
+    /**
      * Register the package's service provider with the Testbench application.
      *
      * @param  Application  $app  The Testbench application.
@@ -79,6 +86,31 @@ class TestCase extends Orchestra
             'client_secret' => 'github-client-secret',
             'redirect' => 'http://localhost/robot-council/auth/github/callback',
         ]);
+
+        // Last, so a test's own value wins over the defaults above
+        foreach ($this->bootConfiguration as $key => $value) {
+            $app['config']->set($key, $value);
+        }
+    }
+
+    /**
+     * Boot a fresh application with one configuration value set before anything reads it.
+     *
+     * `config()->set()` is too late for anything a service provider decides at boot -- what it
+     * schedules, what routes it mounts -- because the provider has already run by the time a test
+     * body executes. This sets the value and boots again, so the provider sees it.
+     *
+     * The application that comes back is a new one: its database is empty, and anything resolved
+     * out of the old container belongs to a container nothing else is using.
+     *
+     * @param  string  $key  The configuration key to set.
+     * @param  mixed  $value  What to set it to.
+     */
+    public function rebootWith(string $key, mixed $value): void
+    {
+        $this->bootConfiguration[$key] = $value;
+
+        $this->refreshApplication();
     }
 
     /**

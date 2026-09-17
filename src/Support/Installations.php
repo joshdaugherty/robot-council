@@ -77,13 +77,17 @@ final class Installations
     public function revoke(Installation $installation): int
     {
         return DB::transaction(function () use ($installation): int {
+            // The installation's own row first, then the tokens. That is the package's lock order,
+            // and `AgentSessions::renew()` already held this row while reaching for the same
+            // tokens -- so taking them the other way round here was a deadlock between revoking an
+            // installation and one of its sessions renewing.
+            $installation->forceFill(['revoked_at' => Carbon::now()])->save();
+
             $deleted = Tokens::deleted($installation->tokens()->delete());
 
             foreach ($this->sessionsOf($installation) as $session) {
                 $deleted += Tokens::deleted($session->tokens()->delete());
             }
-
-            $installation->forceFill(['revoked_at' => Carbon::now()])->save();
 
             return $deleted;
         });

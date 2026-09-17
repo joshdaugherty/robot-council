@@ -6,17 +6,20 @@ namespace RobotCouncil\Support;
 
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use RobotCouncil\Access\Tokens;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\AgentSessionStatus;
 use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Models\Installation;
 
 /**
- * Starting, renewing, and ending the session one agent process runs under.
+ * Starting and renewing the session one agent process runs under.
  *
  * A session token is short-lived on purpose: the helper renews it without a restart and without a
  * human, so the window a leaked one is useful in is minutes rather than the installation's month.
+ *
+ * Ending a session is `SessionPresence`'s, because ending it and finding it gone are the same
+ * transition and have to be written in one place: each is conditional on the row not already being
+ * `gone`, which is what makes `Events\SessionGone` fire once for a session however it ended.
  */
 final class AgentSessions
 {
@@ -28,10 +31,12 @@ final class AgentSessions
     /**
      * @param  Credentials  $credentials  The configured lifetimes.
      * @param  FleetEvents  $events  The change feed.
+     * @param  SessionPresence  $presence  Where contact is recorded.
      */
     public function __construct(
         private readonly Credentials $credentials,
-        private readonly FleetEvents $events
+        private readonly FleetEvents $events,
+        private readonly SessionPresence $presence
     ) {}
 
     /**
@@ -86,32 +91,19 @@ final class AgentSessions
 
             $abilities = $current->abilities();
 
-            // Delete first: a renewal that failed afterwards leaves a session with no token,
-            // which the helper recovers from by starting a new session
+            // Contact before tokens, and through the presence store rather than beside it. Two
+            // reasons, and both were bugs. The order is the package's lock order -- the session row
+            // before `personal_access_tokens` -- and taking them the other way round here while
+            // `SessionPresence` takes them this way is a deadlock between a renewal and the sweep
+            // ending the same session, which is exactly the moment both run. And a renewal is
+            // contact: a stale session whose bridge renews has to come back, which a bare write to
+            // `last_seen_at` would not do -- it would leave a stale row with a fresh contact time,
+            // which no sweep pass can reach again.
+            $this->presence->sighted($session);
+
             $session->tokens()->delete();
 
-            $session->forceFill(['last_seen_at' => Carbon::now()])->save();
-
             return new IssuedCredential($session, $this->issueToken($session, $abilities), $abilities);
-        });
-    }
-
-    /**
-     * End a session: its tokens stop working, and it can never be renewed.
-     *
-     * @param  AgentSession  $session  The session to end.
-     * @return int How many tokens were deleted.
-     */
-    public function end(AgentSession $session): int
-    {
-        return DB::transaction(function () use ($session): int {
-            $deleted = Tokens::deleted($session->tokens()->delete());
-
-            // Marked gone as well as stripped of tokens, because an installation that still holds
-            // its own credential could otherwise renew the session straight back into service
-            $session->forceFill(['status' => AgentSessionStatus::Gone])->save();
-
-            return $deleted;
         });
     }
 

@@ -33,6 +33,23 @@ enum FleetEventType: string
     case SessionEnrolled = 'session.enrolled';
 
     /**
+     * A session stopped answering for long enough to be marked stale. It still holds whatever it
+     * claimed, so this is a warning rather than a release.
+     */
+    case SessionStale = 'session.stale';
+
+    /**
+     * A stale session made a request, so it is active again.
+     */
+    case SessionResumed = 'session.resumed';
+
+    /**
+     * A session ended: the process said so, an admin revoked it, or it stopped answering for long
+     * enough. Whatever it held is released.
+     */
+    case SessionGone = 'session.gone';
+
+    /**
      * Whether an event of this type is only visible to some readers.
      *
      * @return bool True for narration, which #29 restricts, and false for everything else.

@@ -129,17 +129,53 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Presence
+    |--------------------------------------------------------------------------
+    |
+    | How long an agent session may go without contact, in minutes. Every
+    | authenticated agent request counts as contact, and a process with nothing
+    | else to send posts a heartbeat. A stale session still holds what it
+    | claimed and is active again on its next request; a session that has gone
+    | is final, its tokens are refused, and its claims and locks are released.
+    |
+    | `gone_after_minutes` is always read as at least a minute past
+    | `stale_after_minutes`, so the warning state is reachable rather than
+    | skipped. Both are measured by `robot-council:sweep-sessions`, so neither
+    | can fire sooner than the interval that command runs on, and both are
+    | wall-clock times: leave `app.timezone` at UTC, or a daylight-saving
+    | transition moves every session's contact time by an hour at once.
+    |
+    */
+
+    'presence' => [
+        'stale_after_minutes' => (int) env('ROBOT_COUNCIL_PRESENCE_STALE_AFTER_MINUTES', 5),
+        'gone_after_minutes' => (int) env('ROBOT_COUNCIL_PRESENCE_GONE_AFTER_MINUTES', 30),
+
+        // How many sessions one sweep may mark in each of its two passes. A fleet that went
+        // silent at once -- an outage, a network partition -- is otherwise a single unbounded
+        // batch, and every session in it takes the change feed's one writer lock in turn while
+        // every agent's narration queues behind it. What is left over is marked a minute later.
+        'max_per_sweep' => (int) env('ROBOT_COUNCIL_PRESENCE_MAX_PER_SWEEP', 500),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Schedule
     |--------------------------------------------------------------------------
     |
-    | Whether the package adds its hourly prune of expired device codes to this
-    | application's schedule. Turn it off to run `robot-council:prune-device-codes`
-    | on another schedule, or from something other than Laravel's scheduler.
+    | Whether the package adds its own entries to this application's schedule:
+    | an hourly prune of expired device codes, and a sweep of agent-session
+    | presence every minute. Turn either off to run `robot-council:prune-device-codes`
+    | or `robot-council:sweep-sessions` on another schedule, or from something
+    | other than Laravel's scheduler. Turning the sweep off without running it
+    | elsewhere means no session is ever marked stale or gone, and whatever a
+    | dead process was holding stays held.
     |
     */
 
     'schedule' => [
         'prune_device_codes' => true,
+        'sweep_sessions' => true,
     ],
 
     /*

@@ -8,7 +8,7 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use RobotCouncil\Models\AgentSession;
-use RobotCouncil\Support\AgentSessions;
+use RobotCouncil\Support\SessionPresence;
 
 /**
  * Revokes one agent session, leaving every other session on the same installation alone.
@@ -24,14 +24,15 @@ final class RevokeSessionCommand extends Command
     /**
      * End the session.
      *
-     * @param  AgentSessions  $sessions  The session store.
+     * @param  SessionPresence  $presence  The presence store, which owns ending a session.
      * @return int The command's exit code.
      */
-    public function handle(AgentSessions $sessions): int
+    public function handle(SessionPresence $presence): int
     {
         $id = $this->argument('session');
 
-        $session = AgentSession::query()->whereKey($id)->first();
+        // With the installation, which the `session.gone` event names
+        $session = AgentSession::query()->with('installation')->whereKey($id)->first();
 
         if (! $session instanceof AgentSession) {
             $this->components->error(sprintf('No agent session with ID %s.', Argument::text($id)));
@@ -39,7 +40,7 @@ final class RevokeSessionCommand extends Command
             return self::FAILURE;
         }
 
-        $deleted = $sessions->end($session);
+        $deleted = $presence->revoke($session);
 
         $this->components->info(sprintf(
             'Ended agent session %d on installation %d. %d token(s) deleted.',

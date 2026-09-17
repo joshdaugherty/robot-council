@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/robot-council/core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/robot-council/core/actions/workflows/ci.yml?query=branch%3Amain)
 
-The core package of Robot Council, a coordination service for fleets of AI coding agents. It is installed into a host Laravel application, which it gives GitHub sign-in restricted to an allowlist of GitHub accounts, and agent enrollment through the device-code flow. The rest of the service — task claims, named locks, presence, and a change feed — is designed in [issue #14](https://github.com/robot-council/core/issues/14) and not built yet.
+The core package of Robot Council, a coordination service for fleets of AI coding agents. It is installed into a host Laravel application, which it gives GitHub sign-in restricted to an allowlist of GitHub accounts, and agent enrollment through the device-code flow, agent-session presence, and the fleet's change feed. The rest of the service — task claims and named locks — is designed in [issue #14](https://github.com/robot-council/core/issues/14) and not built yet.
 
 ## Requirements
 
@@ -85,6 +85,10 @@ displays a short code, and the developer types it into a page while signed in.
    given an installation credential. That credential can do one thing: start and renew sessions.
 4. Each agent process calls `POST {prefix}/api/sessions` for a short-lived session token, and
    `POST {prefix}/api/sessions/{id}/renew` to replace it without a restart and without a human.
+   `DELETE {prefix}/api/sessions/{id}` ends one when its harness exits, so what it held is released
+   at once rather than after the presence threshold. All three take the installation credential,
+   because the token belonging to the process that just died is the one thing that may no longer
+   work. Ending is idempotent.
 
 Every response that carries a bearer token names it `token`, every expiry is an `expires_in` in
 seconds, and `abilities` always describes the token beside it. Where a response also names
@@ -115,10 +119,52 @@ php artisan robot-council:revoke-ability <installation> events:post
 php artisan robot-council:revoke-installation <installation>   # and every session token it issued
 php artisan robot-council:revoke-session <session>             # one process only
 php artisan robot-council:prune-device-codes                   # scheduled hourly
+php artisan robot-council:sweep-sessions                       # scheduled every minute
 ```
 
 Granting or revoking an ability rewrites the session tokens already in flight, so it takes effect on
 the next request rather than within the hour a session token lives.
+
+## Presence
+
+The fleet knows which agent processes are alive without asking any harness to keep one running.
+**Every authenticated agent request is contact**, so a process that only ever reads the feed is as
+visible as one that narrates. A process with nothing else to send posts `POST {prefix}/api/agent/heartbeat`,
+which answers with both thresholds as durations so a bridge picks its own cadence:
+
+```json
+{ "session_id": 12, "status": "active", "stale_in": 300, "gone_in": 1800 }
+```
+
+`robot-council:sweep-sessions` moves a session that has stopped answering to `stale`, and then to
+`gone`:
+
+| state | means | what it does to the session |
+| --- | --- | --- |
+| `active` | heard from inside `presence.stale_after_minutes` | nothing |
+| `stale` | quiet for longer than that | still holds whatever it claimed; one request brings it back |
+| `gone` | quiet past `presence.gone_after_minutes`, ended, or revoked | final: its tokens are refused, it is never renewed, and what it held is released |
+
+A session that has gone is never reused — the process starts a new one. Each transition writes one
+event to the change feed (`session.stale`, `session.resumed`, `session.gone`), and going `gone`
+dispatches `RobotCouncil\Events\SessionGone` once, after the transaction commits.
+
+**Listen to `SessionGone` from a queued listener.** Laravel runs an after-commit callback outside
+any try/catch, so a synchronous listener that throws escapes the transaction that ended the session
+with the row already written.
+
+A host that releases its own resources when a session goes registers a step on the sweep, which runs
+on every sweep rather than once per session — a per-session signal can be missed, and a scheduled
+sweep cannot:
+
+```php
+$this->app->make(RobotCouncil\Support\SessionReleases::class)->register(function (): void {
+    // release whatever a session that has gone was holding
+});
+```
+
+**Leave `app.timezone` at UTC.** The thresholds are measured against wall-clock contact times, so a
+daylight-saving transition moves every session's contact time by an hour at once.
 
 ## The change feed
 

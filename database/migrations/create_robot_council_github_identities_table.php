@@ -22,8 +22,10 @@ return new class extends Migration
         Schema::create('robot_council_github_identities', function (Blueprint $table): void {
             $table->id();
 
-            // One identity per user, and per GitHub account
-            $table->foreignId('user_id')->unique()->constrained('users')->cascadeOnDelete();
+            // One identity per user, and per GitHub account. No foreign key: the host owns its
+            // users table, including its name and the type of its key, and a user that has gone
+            // is refused at sign-in rather than by the database.
+            $table->unsignedBigInteger('user_id')->unique();
             $table->unsignedBigInteger('github_id')->unique();
 
             // What the account looked like at the last sign-in, for display only

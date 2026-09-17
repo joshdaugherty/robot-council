@@ -14,6 +14,9 @@ use Illuminate\Database\Eloquent\Model;
  * host-owned column could be written by mass assignment, a seeder, an admin form, or the host's
  * own GitHub linking, and whoever wrote it would hold an allowlisted identity.
  *
+ * There is no foreign key to the host's users table, whose name and key type are the host's to
+ * choose. An identity whose user has gone is refused at sign-in instead.
+ *
  * @property int $user_id
  * @property int $github_id
  * @property string $github_login

@@ -1,0 +1,67 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\Schema;
+
+/**
+ * Relaxes the two columns of this application's users table that a GitHub-only developer cannot
+ * fill: they have no password here, and a GitHub account need not expose a verified primary email
+ * address. The package adds no columns of its own to this table; it maps users to GitHub accounts
+ * in its own `robot_council_github_identities` table.
+ *
+ * **Review before running.** Changing a column rewrites its definition, so a custom character set,
+ * collation, default, or comment on `password` or `email` is replaced by this application's
+ * defaults. On SQLite, Laravel rebuilds the whole table, which drops anything not visible to the
+ * schema builder, such as a trigger. Each change is skipped when the column is already nullable.
+ *
+ * `robot-council:install` writes this file. Commit it, and run it with `php artisan migrate`.
+ */
+return new class extends Migration
+{
+    /**
+     * Make `password` and `email` nullable, where they are not already.
+     */
+    public function up(): void
+    {
+        foreach (['password', 'email'] as $column) {
+            // Leave a column that already admits null untouched, so nothing is rewritten
+            if ($this->isNullable($column)) {
+                continue;
+            }
+
+            Schema::table('users', function ($table) use ($column): void {
+                $table->string($column)->nullable()->change();
+            });
+        }
+    }
+
+    /**
+     * Leave the columns nullable.
+     *
+     * Reverting is deliberately left out: rows this package created have no password and may have
+     * no email, so a NOT NULL constraint could not be restored while they exist.
+     */
+    public function down(): void
+    {
+        //
+    }
+
+    /**
+     * Determine whether a column of the users table already admits null.
+     *
+     * @param  string  $column  The column to inspect.
+     * @return bool True when the column is nullable, or absent.
+     */
+    private function isNullable(string $column): bool
+    {
+        foreach (Schema::getColumns('users') as $definition) {
+            if (($definition['name'] ?? null) === $column) {
+                return (bool) ($definition['nullable'] ?? false);
+            }
+        }
+
+        return true;
+    }
+};

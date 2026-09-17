@@ -3,7 +3,13 @@ includes:
 
 parameters:
     level: max
+    # This package ships its own config file; Larastan otherwise measures against the host
+    # application's config path, and reports every `env()` call here as one outside config.
+    configDirectories:
+        - config
     paths:
+        - config
+        - routes
         - src
         - tests
         - rector.php

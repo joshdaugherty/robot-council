@@ -225,16 +225,19 @@ public function publicUrl(
 ): string {
     $disk = $filesystems->disk('public');
 
-    \assert($disk instanceof Cloud);
+    if (! $disk instanceof Cloud) {
+        throw new RuntimeException('The public disk must be a cloud disk to build a URL.');
+    }
 
     return $disk->url($path);
 }
 ```
 
 A method that only reads and writes files takes `Filesystem`; one that builds URLs takes (or
-narrows to) `Cloud`; neither needs `FilesystemAdapter`. Prefer `assert` + `instanceof` (or
-`if` / `throw`) over a misleading `@var` on the return value. Larastan special-cases some facade
-returns — it types `Storage::disk()` as `FilesystemAdapter` — so `url()` resolves through the
+narrows to) `Cloud`; neither needs `FilesystemAdapter`. Narrow with `if` / `throw` over a
+misleading `@var` on the return value. **Not `assert()`:** Pest's `security()` preset bans it in
+the package's namespaces, and a failing `if` says what went wrong where `assert()` is compiled
+out under `zend.assertions=-1`. Larastan special-cases some facade returns — it types `Storage::disk()` as `FilesystemAdapter` — so `url()` resolves through the
 facade while the same call through an injected `Factory` has only `Filesystem` to go on.
 
 ### Choose a contract when
@@ -264,8 +267,8 @@ from the facade's `@method` PHPDoc.
 1. Use a first-class API on the same object — e.g. `session()->flash('success', $message);
    return back();` rather than an undeclared `back()->withSuccess($message)`.
 2. Wrap the behavior in your own small class or trait with real method signatures.
-3. Narrow types with `\assert($x instanceof Concrete)` before calling methods only the concrete
-   type declares.
+3. Narrow types with `if (! $x instanceof Concrete) { throw … }` before calling methods only the
+   concrete type declares. The `security()` preset bans `assert()`.
 4. Last resort: a dedicated PHPStan stub or extension, with a comment near the call site
    explaining why.
 
@@ -318,8 +321,8 @@ Pest's `php()`, `security()`, and `strict()` presets run over the package's auto
 - **Strictness** — `declare(strict_types=1)` and strict comparison (`===`, `!==`, never `==`).
 - **Functions** — no debugging or output functions (`dd`, `dump`, `ray`, `var_dump`, `print_r`,
   `var_export`, `echo`, `print`, `die`, and more), no `sleep` or `usleep`, and none of the
-  functions `security()` bans (`md5`, `sha1`, `rand`, `mt_rand`, `uniqid`, `eval`, `exec`,
-  `shell_exec`, `system`, `unserialize`, `extract`, and more). The full lists are in
+  functions `security()` bans (`assert`, `md5`, `sha1`, `rand`, `mt_rand`, `uniqid`, `eval`,
+  `exec`, `shell_exec`, `system`, `unserialize`, `extract`, and more). The full lists are in
   `vendor/pestphp/pest/src/ArchPresets/`.
 
 ## 15. Verification

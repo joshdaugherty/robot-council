@@ -64,6 +64,14 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
   falls back to `array`. Rate limiting is the visible difference: on a database store the limiter
   issues a dozen queries before the route's own first query, which changes where a `DB::listen`
   injection lands. Name the store alongside any result that depends on query order.
+- **The suite's summary and its exit code are different answers, and CI reads the exit code.**
+  `phpunit.xml.dist` sets `failOnWarning`, `failOnRisky`, `failOnEmptyTestSuite` and
+  `beStrictAboutOutputDuringTests`, so a run can print `Tests: 388 passed` and still exit 1 with no
+  failure shown anywhere -- not in the summary, and not in `build/report.junit.xml`, which records
+  neither warnings nor risky tests. One `use SomeGlobalClass;` in a test file with no namespace does
+  it: PHP warns that the statement has no effect, and the run fails. Read `$?`, and never take a
+  green reading from a command whose output went through a pipe, which throws the status away. To
+  find what a silent failure was, run with `--log-events-text` and grep for `Triggered`.
 - **`composer.lock` is gitignored.** Every CI run and every fresh install resolves dependencies anew, so an unchanged branch can go red later. Compare resolved versions before blaming a diff (see `measurement-parity`).
 - **CI is one workflow with one required check.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to `main`, with no path filters:
   - `tests` runs `vendor/bin/pest --ci` on ubuntu and windows × PHP 8.5 and 8.4 × Laravel 13 × `prefer-lowest` and `prefer-stable`, with `fail-fast: false`, on Pest 5 and PHPUnit 13.

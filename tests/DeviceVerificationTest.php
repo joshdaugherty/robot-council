@@ -9,6 +9,7 @@ declare(strict_types=1);
  * @command  vendor/bin/pest --compact tests/DeviceVerificationTest.php
  */
 
+use Carbon\CarbonImmutable;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Models\DeviceCode;
 use RobotCouncil\Models\Installation;
@@ -22,11 +23,17 @@ beforeEach(function (): void {
 });
 
 it('shows what the request claims, how old it is, and both addresses', function (): void {
+    // Pinned to a whole second before the row is written. `created_at` is stored to the second,
+    // so a request that lands at x.8 seconds and a clock moved on by exactly 42 leave an age of
+    // either 41 or 42 depending on how the driver rounded -- which is a test that fails on one CI
+    // cell in eight and looks like flake.
+    $this->travelTo(CarbonImmutable::parse('2026-01-01 12:00:00'));
+
     // The two addresses must differ, or one assertion satisfies both rows and deleting either from
     // the page leaves this green -- and comparing them is the whole reason they are shown
     $enrollment = requestDeviceCode($this->withServerVariables(['REMOTE_ADDR' => '203.0.113.10']));
 
-    $this->travelTo(now()->addSeconds(42));
+    $this->travelTo(CarbonImmutable::parse('2026-01-01 12:00:42'));
 
     $response = $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.7'])
         ->actingAs($this->developer, 'web')

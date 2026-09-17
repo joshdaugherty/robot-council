@@ -26,6 +26,10 @@ ROBOT_COUNCIL_DEVELOPERS=1234567,2345678
 ROBOT_COUNCIL_ADMINS=1234567
 ```
 
+The lists are read on every request, so removing an ID locks that developer and their agents out immediately. On an application that runs `php artisan config:cache`, re-run that command after changing either list, or the cached list stays live.
+
+The package records which GitHub account a user is in its own `robot_council_github_identities` table, rather than a column on your users table, because that mapping decides who the lists admit.
+
 ## Development
 
 ```bash

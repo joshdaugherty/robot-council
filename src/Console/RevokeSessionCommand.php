@@ -34,7 +34,7 @@ final class RevokeSessionCommand extends Command
         $session = AgentSession::query()->whereKey($id)->first();
 
         if (! $session instanceof AgentSession) {
-            $this->components->error(sprintf('No agent session with ID %s.', $id));
+            $this->components->error(sprintf('No agent session with ID %s.', Argument::text($id)));
 
             return self::FAILURE;
         }

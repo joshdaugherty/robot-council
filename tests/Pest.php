@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Carbon\CarbonInterface;
 use Laravel\Socialite\Two\User as GitHubAccount;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Models\DeviceCode;
@@ -76,6 +77,24 @@ function githubAccount(
     ]);
 
     return $account;
+}
+
+/**
+ * Narrow a value a test read off an Eloquent model, which arrives untyped when the analyzer cannot
+ * infer the column.
+ *
+ * @param  mixed  $value  The value to narrow.
+ * @return CarbonInterface The value, as a date.
+ *
+ * @throws RuntimeException When the value is not a date.
+ */
+function dateValue(mixed $value): CarbonInterface
+{
+    if (! $value instanceof CarbonInterface) {
+        throw new RuntimeException(sprintf('Expected a date, got %s.', get_debug_type($value)));
+    }
+
+    return $value;
 }
 
 /**

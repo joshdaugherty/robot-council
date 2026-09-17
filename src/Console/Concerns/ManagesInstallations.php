@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RobotCouncil\Console\Concerns;
 
+use RobotCouncil\Console\Argument;
 use RobotCouncil\Models\Installation;
 
 /**
@@ -28,7 +29,7 @@ trait ManagesInstallations
         $installation = Installation::query()->whereKey($id)->first();
 
         if (! $installation instanceof Installation) {
-            $this->components->error(sprintf('No installation with ID %s.', $id));
+            $this->components->error(sprintf('No installation with ID %s.', Argument::text($id)));
 
             return null;
         }

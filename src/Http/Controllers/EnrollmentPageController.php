@@ -32,7 +32,12 @@ final class EnrollmentPageController
 
         $code = $typed === '' ? null : $deviceCodes->findByUserCode($typed);
 
-        return view('robot-council::enroll', [
+        // Pinned, because whether the analyzer can resolve a package view depends on whether it
+        // could boot the application, which differs between a developer's machine and CI
+        /** @var view-string $template */
+        $template = 'robot-council::enroll';
+
+        return view($template, [
             'userCode' => DeviceCodes::normalizeUserCode($typed),
             'code' => $code,
 

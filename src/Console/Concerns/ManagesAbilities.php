@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RobotCouncil\Console\Concerns;
 
 use RobotCouncil\Access\Ability;
+use RobotCouncil\Console\Argument;
 use RobotCouncil\Models\Installation;
 use RobotCouncil\Support\Installations;
 
@@ -64,7 +65,7 @@ trait ManagesAbilities
      */
     private function abilityArgument(): ?Ability
     {
-        $ability = Ability::tryFrom($this->argument('ability'));
+        $ability = Ability::tryFrom(Argument::text($this->argument('ability')));
 
         if ($ability === null || ! \in_array($ability, Ability::grantable(), true)) {
             $this->components->error(sprintf(

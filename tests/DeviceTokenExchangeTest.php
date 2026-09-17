@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\PersonalAccessToken;
 use RobotCouncil\Access\Ability;
+use RobotCouncil\Access\Tokens;
 use RobotCouncil\Models\DeviceCode;
 use RobotCouncil\Models\Installation;
 use RobotCouncil\Tests\TestCase;
@@ -85,8 +86,9 @@ it('issues a credential that can do nothing but start sessions', function (): vo
     // The credential itself carries only the one ability; the rest ride on session tokens
     $credential = PersonalAccessToken::query()->sole();
 
-    expect($credential->abilities)->toBe([Ability::SessionsStart->value])
-        ->and($credential->expires_at?->toDateTimeString())->toBe($installation->expires_at->toDateTimeString());
+    expect(Tokens::abilities($credential))->toBe([Ability::SessionsStart->value])
+        ->and(dateValue($credential->getAttribute('expires_at'))->toDateTimeString())
+        ->toBe($installation->expires_at->toDateTimeString());
 });
 
 it('answers authorization_pending until a developer decides', function (): void {

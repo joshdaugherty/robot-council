@@ -17,6 +17,7 @@ use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Route;
 use Laravel\Sanctum\PersonalAccessToken;
 use RobotCouncil\Access\Ability;
+use RobotCouncil\Access\Tokens;
 use RobotCouncil\Http\Middleware\EnsureAllowlistedDeveloper;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\Installation;
@@ -55,8 +56,8 @@ it("starts a session carrying the installation's abilities", function (): void {
     // The session's token expires on the session's schedule, not the installation's
     $token = PersonalAccessToken::query()->where('tokenable_type', (new AgentSession)->getMorphClass())->sole();
 
-    expect($token->abilities)->toBe([Ability::TasksCreate->value, Ability::EventsPost->value])
-        ->and($token->expires_at?->timestamp)->toBe(now()->addMinutes(60)->timestamp);
+    expect(Tokens::abilities($token))->toBe([Ability::TasksCreate->value, Ability::EventsPost->value])
+        ->and(dateValue($token->getAttribute('expires_at'))->timestamp)->toBe(now()->addMinutes(60)->timestamp);
 });
 
 it('authenticates an agent route as the session, not as the developer', function (): void {

@@ -3,11 +3,11 @@
 declare(strict_types=1);
 
 /**
- * One vocabulary across the four machine endpoints, asserted in one place.
+ * One vocabulary across the machine endpoints that answer with a body, asserted in one place.
  *
- * A rename is easy to do in three files out of four, and nothing else in the suite would notice:
- * every other test reads one endpoint and would keep passing against a response that disagreed with
- * its neighbours. This drives all four and compares them to each other.
+ * A rename is easy to do in all but one file, and nothing else in the suite would notice: every
+ * other test reads one endpoint and would keep passing against a response that disagreed with its
+ * neighbours. This drives them all and compares them to each other.
  *
  * The shape is decided in #40, and it is deliberately not RFC 8628's: the token endpoint's request
  * already diverges from the RFC, so no standard client can complete this flow whatever the response
@@ -144,6 +144,48 @@ it('answers 201 where it creates something and 200 where it replaces one', funct
     $this->machine($credential)
         ->postJson(route('robot-council.sessions.renew', ['session' => $start->json('session_id')]))
         ->assertStatus(200);
+});
+
+it('names a duration the same way wherever one is stated', function (): void {
+    // The presence endpoints state durations that are not expiries -- how long the silence may
+    // last, not when a credential dies -- so they do not carry `expires_in`. What they must not do
+    // is state an instant: a bridge on a machine whose clock is wrong could not use one, which is
+    // the same reason every expiry here is a duration.
+    $enrollment = requestDeviceCode($this, [Ability::TasksCreate->value]);
+
+    $this->actingAs($this->developer, 'web')->post(route('robot-council.enroll.approve'), [
+        'user_code' => $enrollment['record']->user_code,
+        'confirmed' => '1',
+    ])->assertRedirect();
+
+    $this->flushSession();
+
+    $credential = stringValue($this->postJson(route('robot-council.device.token'), [
+        'device_code' => $enrollment['device_code'],
+        'code_verifier' => $enrollment['verifier'],
+    ])->json('token'));
+
+    $start = $this->machine($credential)->postJson(route('robot-council.sessions.start'))->assertCreated();
+
+    $token = stringValue($start->json('token'));
+
+    /** @var array<string, mixed> $heartbeat */
+    $heartbeat = (array) $this->machine($token)
+        ->postJson(route('robot-council.agent.heartbeat'))
+        ->assertOk()
+        ->json();
+
+    foreach (['stale_in', 'gone_in'] as $duration) {
+        expect($heartbeat[$duration])->toBeInt()->toBeGreaterThan(0);
+    }
+
+    expect($heartbeat)->not->toHaveKey('stale_at')
+        ->and($heartbeat)->not->toHaveKey('gone_at')
+        ->and($heartbeat)->not->toHaveKey('last_seen_at')
+
+        // And the session is named the same way it is everywhere else
+        ->and($heartbeat)->toHaveKey('session_id')
+        ->and($heartbeat)->not->toHaveKey('id');
 });
 
 it('keeps the RFC 8628 error vocabulary, which is the half that is conformant', function (): void {

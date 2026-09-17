@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace RobotCouncil\Support;
 
 use Closure;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * The steps the presence sweep runs after it has finished marking sessions, and the package's
@@ -20,8 +22,12 @@ use Closure;
  * subclass the sweep. It is a singleton, so a step registered from a service provider is there for
  * every sweep the process runs.
  *
- * A step that throws stops the sweep, and that is the intended direction: a release that silently
- * failed leaves a task claimed by a process that no longer exists, which nothing else reports.
+ * **Every step runs, and then the first failure is rethrown.** A step that throws still fails the
+ * sweep, which is the intended direction -- a release that failed silently leaves a task claimed by
+ * a process that no longer exists, and nothing else reports that. But it must not be able to
+ * suppress a sibling: #25 releases tasks and #26 releases locks, and they are independent. A bare
+ * loop would let a step that throws deterministically stop the one registered after it on every
+ * sweep forever, so the locks of every session that ever went would be held with nothing to say so.
  */
 final class SessionReleases
 {
@@ -43,22 +49,31 @@ final class SessionReleases
     }
 
     /**
-     * Run every registered step.
+     * Run every registered step, in the order they were registered.
+     *
+     * @throws Throwable The first failure, once every step has had its turn.
      */
     public function run(): void
     {
-        foreach ($this->steps as $step) {
-            $step();
-        }
-    }
+        $failed = null;
 
-    /**
-     * How many steps are registered.
-     *
-     * @return int The number of steps a sweep will run.
-     */
-    public function count(): int
-    {
-        return \count($this->steps);
+        foreach ($this->steps as $position => $step) {
+            try {
+                $step();
+            } catch (Throwable $failure) {
+                // Logged per step, because only the first one is rethrown and a second subsystem
+                // failing at the same time is the thing an operator most needs to know
+                Log::error(
+                    sprintf('robot-council: release step %d failed during the presence sweep.', $position),
+                    ['exception' => $failure]
+                );
+
+                $failed ??= $failure;
+            }
+        }
+
+        if ($failed instanceof Throwable) {
+            throw $failed;
+        }
     }
 }

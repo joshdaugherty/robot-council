@@ -47,6 +47,16 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
     public const string ADMIN_ABILITY = 'robot-council-admin';
 
     /**
+     * What a route accepts where it takes one of the package's own row IDs.
+     *
+     * Bounded in length as well as in character set. `whereNumber` is `[0-9]+`, which lets through
+     * a number no bigint can hold: Postgres answers `22003 value out of range` -- a 500 -- where
+     * SQLite quietly matches no rows, so a suite on SQLite cannot see it. Eighteen digits fit in a
+     * signed 64-bit integer whatever they are.
+     */
+    public const string ROUTE_ID = '[0-9]{1,18}';
+
+    /**
      * The named rate limit on the unauthenticated device-code endpoint.
      */
     public const string DEVICE_CODE_LIMITER = 'robot-council-device-code';

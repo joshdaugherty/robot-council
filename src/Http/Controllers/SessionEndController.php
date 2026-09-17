@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RobotCouncil\Http\Principal;
 use RobotCouncil\Models\AgentSession;
+use RobotCouncil\Models\AgentSessionStatus;
 use RobotCouncil\Support\SessionPresence;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -43,15 +44,19 @@ final class SessionEndController
     {
         $installation = Principal::installation($request);
 
-        $record = AgentSession::query()->whereKey($session)->first();
+        // With the installation, which the `session.gone` event names, so describing the session
+        // costs no second query inside the transaction that ends it.
+        $record = AgentSession::query()->with('installation')->whereKey($session)->first();
 
         if (! $record instanceof AgentSession) {
             throw new NotFoundHttpException;
         }
 
-        // An installation ends only what it started. Checked before anything is written, so a
-        // credential probing for other installations' session IDs learns nothing from the timing
-        // and changes nothing by asking.
+        // An installation ends only what it started, and the check runs before anything is
+        // written. The 404-versus-403 split does tell a caller which session IDs exist, which is
+        // the same disclosure `SessionRenewController` already makes; it is accepted rather than
+        // absent, because every holder of an installation credential is an allowlisted developer's
+        // machine and a session ID on its own authorizes nothing.
         if ($record->installation_id !== $installation->getKey()) {
             throw new AccessDeniedHttpException;
         }
@@ -60,7 +65,12 @@ final class SessionEndController
 
         return new JsonResponse([
             'session_id' => $record->getKey(),
-            'status' => $record->status->value,
+
+            // Stated rather than read back. A concurrent sweep or a second DELETE may have been the
+            // call that moved the row, in which case `end()` changed nothing and the instance still
+            // carries the status it was loaded with -- and answering `active` for a session that
+            // has gone is the one thing this endpoint must not do.
+            'status' => AgentSessionStatus::Gone->value,
         ], Response::HTTP_OK);
     }
 }

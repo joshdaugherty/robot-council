@@ -138,16 +138,24 @@ return [
     | claimed and is active again on its next request; a session that has gone
     | is final, its tokens are refused, and its claims and locks are released.
     |
-    | `gone_after_minutes` is never shorter than `stale_after_minutes`: a
-    | smaller value is read as equal to it, so the warning state always exists.
-    | Both are measured by `robot-council:sweep-sessions`, so neither can fire
-    | sooner than the interval that command runs on.
+    | `gone_after_minutes` is always read as at least a minute past
+    | `stale_after_minutes`, so the warning state is reachable rather than
+    | skipped. Both are measured by `robot-council:sweep-sessions`, so neither
+    | can fire sooner than the interval that command runs on, and both are
+    | wall-clock times: leave `app.timezone` at UTC, or a daylight-saving
+    | transition moves every session's contact time by an hour at once.
     |
     */
 
     'presence' => [
         'stale_after_minutes' => (int) env('ROBOT_COUNCIL_PRESENCE_STALE_AFTER_MINUTES', 5),
         'gone_after_minutes' => (int) env('ROBOT_COUNCIL_PRESENCE_GONE_AFTER_MINUTES', 30),
+
+        // How many sessions one sweep may mark in each of its two passes. A fleet that went
+        // silent at once -- an outage, a network partition -- is otherwise a single unbounded
+        // batch, and every session in it takes the change feed's one writer lock in turn while
+        // every agent's narration queues behind it. What is left over is marked a minute later.
+        'max_per_sweep' => (int) env('ROBOT_COUNCIL_PRESENCE_MAX_PER_SWEEP', 500),
     ],
 
     /*

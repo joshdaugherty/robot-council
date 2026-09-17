@@ -31,7 +31,8 @@ final class RevokeSessionCommand extends Command
     {
         $id = $this->argument('session');
 
-        $session = AgentSession::query()->whereKey($id)->first();
+        // With the installation, which the `session.gone` event names
+        $session = AgentSession::query()->with('installation')->whereKey($id)->first();
 
         if (! $session instanceof AgentSession) {
             $this->components->error(sprintf('No agent session with ID %s.', Argument::text($id)));

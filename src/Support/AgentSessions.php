@@ -31,10 +31,12 @@ final class AgentSessions
     /**
      * @param  Credentials  $credentials  The configured lifetimes.
      * @param  FleetEvents  $events  The change feed.
+     * @param  SessionPresence  $presence  Where contact is recorded.
      */
     public function __construct(
         private readonly Credentials $credentials,
-        private readonly FleetEvents $events
+        private readonly FleetEvents $events,
+        private readonly SessionPresence $presence
     ) {}
 
     /**
@@ -89,11 +91,17 @@ final class AgentSessions
 
             $abilities = $current->abilities();
 
-            // Delete first: a renewal that failed afterwards leaves a session with no token,
-            // which the helper recovers from by starting a new session
-            $session->tokens()->delete();
+            // Contact before tokens, and through the presence store rather than beside it. Two
+            // reasons, and both were bugs. The order is the package's lock order -- the session row
+            // before `personal_access_tokens` -- and taking them the other way round here while
+            // `SessionPresence` takes them this way is a deadlock between a renewal and the sweep
+            // ending the same session, which is exactly the moment both run. And a renewal is
+            // contact: a stale session whose bridge renews has to come back, which a bare write to
+            // `last_seen_at` would not do -- it would leave a stale row with a fresh contact time,
+            // which no sweep pass can reach again.
+            $this->presence->sighted($session);
 
-            $session->forceFill(['last_seen_at' => Carbon::now()])->save();
+            $session->tokens()->delete();
 
             return new IssuedCredential($session, $this->issueToken($session, $abilities), $abilities);
         });

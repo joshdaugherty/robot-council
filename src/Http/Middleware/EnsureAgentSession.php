@@ -80,6 +80,11 @@ final class EnsureAgentSession
             throw new UnauthorizedHttpException('Bearer');
         }
 
+        // Handed over rather than loaded twice: a resumption writes a feed event naming the
+        // harness and machine, and reaching for the relation there would be a second query, or a
+        // violation in a host that has turned lazy loading off
+        $session->setRelation('installation', $installation);
+
         $githubId = $this->hostUsers->githubIdForKey($session->user_id);
 
         if ($githubId === null || ! $this->allowlist->admits($githubId)) {

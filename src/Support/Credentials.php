@@ -114,15 +114,29 @@ final class Credentials
     /**
      * How long a session may go without contact before the sweep marks it gone.
      *
-     * Never shorter than the stale threshold. A host that inverted the two would otherwise have
-     * sessions that go gone without ever being stale, so the warning state -- the one an operator
-     * reads before anything is released -- would exist in the enum and never in the feed.
+     * Always at least a minute past the stale threshold, never merely equal to it. Equal is not
+     * enough: the sweep runs its gone pass first, so two identical cutoffs mean every session goes
+     * straight to gone and the warning state -- the one an operator reads before anything is
+     * released -- exists in the enum and never in the feed.
      *
-     * @return int The threshold in minutes, at least the stale threshold.
+     * @return int The threshold in minutes, past the stale threshold.
      */
     public function goneAfterMinutes(): int
     {
-        return max($this->bounded('presence.gone_after_minutes', 30), $this->staleAfterMinutes());
+        return max($this->bounded('presence.gone_after_minutes', 30), $this->staleAfterMinutes() + 1);
+    }
+
+    /**
+     * How many sessions one sweep may move in each of its passes.
+     *
+     * A fleet that went silent at once is otherwise one unbounded batch, and every session in it
+     * takes the feed's single writer lock in turn while every agent's narration queues behind it.
+     *
+     * @return int The ceiling, at least one.
+     */
+    public function maxPerSweep(): int
+    {
+        return $this->bounded('presence.max_per_sweep', 500);
     }
 
     /**

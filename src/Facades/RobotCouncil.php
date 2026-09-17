@@ -9,9 +9,9 @@ use Illuminate\Support\Facades\Facade;
 /**
  * @see \JoshDaugherty\RobotCouncil\RobotCouncil
  */
-class RobotCouncil extends Facade
+final class RobotCouncil extends Facade
 {
-    protected static function getFacadeAccessor(): string
+    public static function getFacadeAccessor(): string
     {
         return \JoshDaugherty\RobotCouncil\RobotCouncil::class;
     }

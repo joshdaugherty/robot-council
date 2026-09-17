@@ -161,6 +161,26 @@ final class HostUsers
     }
 
     /**
+     * Read the GitHub login recorded against a key in the host's users table.
+     *
+     * For display only, as the identities table's own comment says: a login can be renamed and then
+     * claimed by somebody else, so nothing is ever decided on one.
+     *
+     * @param  mixed  $key  The user's primary key, as the host's model types it.
+     * @return string|null The login last seen at sign-in, or null when no identity points at that key.
+     */
+    public function githubLoginForKey(mixed $key): ?string
+    {
+        $userId = HostKey::tryFrom($key);
+
+        if ($userId === null) {
+            return null;
+        }
+
+        return GithubIdentity::query()->where('user_id', $userId)->first()?->github_login;
+    }
+
+    /**
      * Read the GitHub user ID recorded against a key in the host's users table.
      *
      * Used where the developer is known by key rather than as a signed-in user: an installation

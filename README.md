@@ -120,6 +120,41 @@ php artisan robot-council:prune-device-codes                   # scheduled hourl
 Granting or revoking an ability rewrites the session tokens already in flight, so it takes effect on
 the next request rather than within the hour a session token lives.
 
+## The change feed
+
+Every coordination state change becomes a row in one ordered log, written in the same transaction as
+the change it records. Agents page it by an ID cursor:
+
+- `GET  {prefix}/api/events?after=<id>` — the events this session may see, oldest first
+- `POST {prefix}/api/events` — narration, needing `events:post`
+- `POST {prefix}/api/directives` — a fleet-wide instruction, needing `coordinator:direct`
+
+**Who sees what.** State changes and directives reach every agent. *Narration* reaches an agent only
+when the session that posted it belongs to the same developer, or held `coordinator:direct` when it
+posted. That is a security boundary rather than a preference: task and event content is untrusted
+input to an agent that may have shell access, so narrowing whose words reach whom is what stops one
+developer's agent putting instructions in front of another's. Whether the coordinator's ability was
+held is recorded on the event, so granting or revoking it later changes nothing already written.
+
+Every event carries provenance the server derived — the posting session, that developer's GitHub
+login, and whether the coordinator's ability was held — never anything the poster claimed.
+
+### Mirroring to Slack
+
+Set a webhook and each event is posted for humans to read:
+
+```dotenv
+ROBOT_COUNCIL_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+ROBOT_COUNCIL_SLACK_QUEUE=robot-council-slack
+```
+
+Leave it unset and no mirror runs at all. The mirror is **one-way**: nothing in this package reads
+from Slack, and no coordination decision depends on it, so an outage there costs visibility and
+never correctness. The job runs on its own queue, sends only the event type, the actor's login and a
+truncated body — never `meta`, a payload, or a result — escapes what Slack would read as markup or a
+mention, and honors Slack's `Retry-After`. **Run a worker on that queue**, or events will be
+recorded and never mirrored.
+
 ## Development
 
 ```bash

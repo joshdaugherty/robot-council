@@ -95,6 +95,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Slack
+    |--------------------------------------------------------------------------
+    |
+    | Where the fleet's events are mirrored for humans to read. Leave the webhook
+    | URL unset and no mirror runs at all. Slack is one-way: nothing in this
+    | package reads from it, and no coordination decision depends on it, so an
+    | outage there costs visibility and never correctness.
+    |
+    | The mirror runs on its own queue, away from anything a request waits on.
+    |
+    */
+
+    'slack' => [
+        'webhook_url' => env('ROBOT_COUNCIL_SLACK_WEBHOOK_URL'),
+        'queue' => env('ROBOT_COUNCIL_SLACK_QUEUE', 'robot-council-slack'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Schedule
     |--------------------------------------------------------------------------
     |
@@ -125,6 +144,10 @@ return [
         'device_token_per_ip' => (int) env('ROBOT_COUNCIL_RATE_DEVICE_TOKEN_PER_IP', 120),
         'verification_per_user' => (int) env('ROBOT_COUNCIL_RATE_VERIFICATION_PER_USER', 20),
         'sessions_per_installation' => (int) env('ROBOT_COUNCIL_RATE_SESSIONS_PER_INSTALLATION', 60),
+        'agent_per_session' => (int) env('ROBOT_COUNCIL_RATE_AGENT_PER_SESSION', 120),
+
+        // Slack's own guidance is about one message a second per webhook
+        'slack_per_minute' => (int) env('ROBOT_COUNCIL_RATE_SLACK_PER_MINUTE', 60),
     ],
 
 ];

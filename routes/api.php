@@ -16,13 +16,18 @@ declare(strict_types=1);
  */
 
 use Illuminate\Support\Facades\Route;
+use RobotCouncil\Access\Ability;
 use RobotCouncil\Http\Controllers\AgentSessionController;
 use RobotCouncil\Http\Controllers\DeviceCodeController;
 use RobotCouncil\Http\Controllers\DeviceTokenController;
+use RobotCouncil\Http\Controllers\FleetFeedController;
+use RobotCouncil\Http\Controllers\PostDirectiveController;
+use RobotCouncil\Http\Controllers\PostNarrationController;
 use RobotCouncil\Http\Controllers\SessionRenewController;
 use RobotCouncil\Http\Controllers\SessionStartController;
 use RobotCouncil\Http\Middleware\EnsureAgentSession;
 use RobotCouncil\Http\Middleware\EnsureInstallation;
+use RobotCouncil\Http\Middleware\RequireAbility;
 use RobotCouncil\RobotCouncilServiceProvider;
 
 Route::post('device/code', DeviceCodeController::class)
@@ -45,6 +50,21 @@ Route::middleware([EnsureInstallation::class, 'throttle:'.RobotCouncilServicePro
             ->name('sessions.renew');
     });
 
-Route::middleware(EnsureAgentSession::class)->group(function (): void {
-    Route::get('agent/session', AgentSessionController::class)->name('agent.session');
-});
+// Every agent route is limited per session, so one runaway process cannot crowd out the fleet
+Route::middleware([EnsureAgentSession::class, 'throttle:'.RobotCouncilServiceProvider::AGENT_LIMITER])
+    ->group(function (): void {
+        Route::get('agent/session', AgentSessionController::class)->name('agent.session');
+
+        // Reading the feed needs no ability: what a session may see is decided by whose narration
+        // it is, not by what the session was granted
+        Route::get('events', FleetFeedController::class)->name('events.index');
+
+        Route::post('events', PostNarrationController::class)
+            ->middleware(RequireAbility::class.':'.Ability::EventsPost->value)
+            ->name('events.store');
+
+        // The one ability enrollment can never ask for, granted only by an admin afterwards
+        Route::post('directives', PostDirectiveController::class)
+            ->middleware(RequireAbility::class.':'.Ability::CoordinatorDirect->value)
+            ->name('directives.store');
+    });

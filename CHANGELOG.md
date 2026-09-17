@@ -10,6 +10,7 @@ A pre-release shell of the Composer package: it requires PHP 8.4 or later and La
 - Scaffold Laravel package from Spatie skeleton [`40ea724`](https://github.com/joshdaugherty/robot-council/commit/40ea724ee3061df309c29279ad338e525e5484e6)
 
 ### Maintenance and tooling
+- Fix release-notes routing of CLAUDE.md edits and PR title recasing [#12](https://github.com/joshdaugherty/robot-council/pull/12)
 - Remove unused skeleton leftovers and dev dependencies [#9](https://github.com/joshdaugherty/robot-council/pull/9)
 - Adopt Pest's php, security, and strict arch presets and its Rector rules [#8](https://github.com/joshdaugherty/robot-council/pull/8)
 - Run PHPStan and Rector against tests and rector.php [#7](https://github.com/joshdaugherty/robot-council/pull/7)

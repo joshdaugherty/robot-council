@@ -1,0 +1,53 @@
+# robot-council
+
+A **Laravel package** (`joshdaugherty/robot-council`), not an application. It was scaffolded from `spatie/package-skeleton-laravel` and has no features yet: the classes under `src/` are the skeleton's placeholders.
+
+## Layout
+
+- `src/` — namespace `JoshDaugherty\RobotCouncil\`. `RobotCouncilServiceProvider` is built on `spatie/laravel-package-tools` and is auto-discovered by consuming apps through `extra.laravel` in `composer.json`, along with the `RobotCouncil` facade alias.
+- `config/robot-council.php`, `database/migrations/*.php.stub`, `database/factories/`, `resources/views/` — what the provider can publish to a consuming app.
+- `tests/` — Pest on Orchestra Testbench. `tests/Pest.php` binds `tests/TestCase.php`, which registers the service provider; `tests/ArchTest.php` forbids `dd`, `dump`, and `ray`.
+- `.claude/rules/` loads into every session; `.claude/skills/` loads on demand.
+
+## Commands
+
+| Task | Command |
+| --- | --- |
+| Install | `composer install` |
+| Tests | `composer test` (`vendor/bin/pest`); one file or test: `vendor/bin/pest --compact tests/ExampleTest.php --filter=...` |
+| Coverage | `composer test-coverage` (needs PCOV or Xdebug; see the `pcov-setup` skill) |
+| Mutation | `vendor/bin/pest --mutate --path=src --class="JoshDaugherty\RobotCouncil\<Class>"` |
+| Static analysis | `composer analyse` (PHPStan with Larastan, level 5, `phpstan-baseline.neon`) |
+| Format | `vendor/bin/pint --dirty`; check only: `vendor/bin/pint --test` |
+
+**There is no `php artisan`.** Testbench supplies a throwaway Laravel skeleton under `vendor/`, driven by `vendor/bin/testbench`. Its `make:*` generators write into that skeleton, not into this package, so create files by hand.
+
+## Things that are easy to get wrong
+
+- **Every API must exist in the lowest supported Laravel version.** `composer.json` admits Laravel 12 and 13 (`illuminate/contracts`), but the development install resolves the newest. CI tests both, at `prefer-lowest` and `prefer-stable`.
+- **`composer.lock` is gitignored.** Every CI run and every fresh install resolves dependencies anew, so an unchanged branch can go red later. Compare resolved versions before blaming a diff (see `measurement-parity`).
+- **CI is thinner than a green badge suggests:**
+  - `run-tests` runs only when `**.php`, `phpunit.xml.dist`, `composer.json`, `composer.lock`, or its own workflow changes. It is `fail-fast`, so a cancelled cell is neither a pass nor a fail.
+  - `PHPStan` runs on push only, never on the merged state.
+  - `Fix PHP code style issues` runs Pint and **commits `Fix styling` back to the pushed branch**. Fetch and fast-forward before pushing again.
+  - `Update Changelog` runs on `released` only (not prereleases): it writes the release name and body into `CHANGELOG.md` and commits to `main`.
+  - Dependabot opens weekly Composer and GitHub Actions update pull requests labeled `dependencies`. Nothing merges them automatically: take each through `pre-merge-check` like any other change.
+- **`main` has no branch protection.** Nothing but the rules stops a direct push; work on a branch and merge through a pull request (`closing-a-ticket`, `pre-merge-check`).
+- **The repository is owned by a personal account**, so GitHub issue types are unavailable. The issue templates declare them for the day it moves to an organization.
+- **Never disclose an exploitable vulnerability in a public issue or PR.** Use a draft security advisory, per the `security-audit` skill.
+
+## Where the conventions live
+
+Rules (always loaded) — follow them; don't restate them:
+
+- **Shipping:** `adversarial-review` (verify before a change ships or a claim is published), `pre-merge-check` (the nine steps before merging), `sync-pr-branch` (bring a branch current, and the inputs its checks read), `closing-a-ticket` (what "done" means).
+- **Evidence:** `an-empty-result-is-not-evidence`, `measurement-parity`.
+- **Local processes and trees:** `long-running-commands`, `worktrees`.
+- **GitHub:** `github-api-budget`, `filing-defects-across-repos`, `design-decision-forks`.
+- **Prose:** `impersonal-voice-in-github-artifacts`, `no-emoji-in-durable-records`, `american-english-and-dictionary-overrides`.
+
+Skills (activate when working in that area):
+
+- **Code:** `laravel-best-practices`, `php-coding-standards`, `php-documentation`, `pest-testing`.
+- **Tooling:** `pcov-setup`, `security-audit`, `wcag-contrast`.
+- **Writing:** `writing-commits`, `writing-issues` (labels, templates, the `afk`/`hitl` convention), `writing-pull-requests`, `writing-release-notes`.

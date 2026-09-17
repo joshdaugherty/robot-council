@@ -17,7 +17,7 @@ use Illuminate\Database\Eloquent\Model;
  * There is no foreign key to the host's users table, whose name and key type are the host's to
  * choose. An identity whose user has gone is refused at sign-in instead.
  *
- * @property int $user_id
+ * @property string $user_id
  * @property int $github_id
  * @property string $github_login
  * @property string|null $avatar_url
@@ -42,7 +42,6 @@ final class GithubIdentity extends Model
     public function casts(): array
     {
         return [
-            'user_id' => 'integer',
             'github_id' => 'integer',
         ];
     }

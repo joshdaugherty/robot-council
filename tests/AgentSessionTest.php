@@ -49,7 +49,7 @@ it("starts a session carrying the installation's abilities", function (): void {
     $session = AgentSession::query()->sole();
 
     expect($session->installation_id)->toBe($this->installation->getKey())
-        ->and($session->user_id)->toBe($this->developer->getKey())
+        ->and($session->user_id)->toBe(keyValue($this->developer->getKey()))
         ->and($session->project_id)->toBe('uams-statamic')
         ->and($session->hasGone())->toBeFalse();
 

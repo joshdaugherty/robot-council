@@ -75,7 +75,7 @@ it('issues a credential that can do nothing but start sessions', function (): vo
 
     $installation = Installation::query()->sole();
 
-    expect($installation->user_id)->toBe($this->developer->getKey())
+    expect($installation->user_id)->toBe(keyValue($this->developer->getKey()))
         ->and($installation->harness)->toBe('claude-code')
         ->and($installation->machine_label)->toBe('workbench-01')
         ->and($installation->granted_abilities)->toBe(['tasks:create', 'locks:acquire'])

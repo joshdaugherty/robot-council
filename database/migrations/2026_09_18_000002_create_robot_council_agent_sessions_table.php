@@ -29,7 +29,10 @@ return new class extends Migration
             // Denormalized from the installation so an agent route can check the allowlist
             // without a join, and kept as a plain column for the reason given in the
             // installations migration
-            $table->unsignedBigInteger('user_id')->index();
+            // The host's key as text, not a bigint. A host keyed by UUID or ULID is an ordinary
+            // multi-tenant application, and this table holds one row per developer, so the usual
+            // argument for a narrow integer index has nothing to weigh against here.
+            $table->string('user_id', 64)->index();
 
             $table->string('status', 16)->index();
             $table->timestamp('last_seen_at')->nullable();

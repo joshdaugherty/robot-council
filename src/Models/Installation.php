@@ -27,11 +27,11 @@ use RobotCouncil\Access\Ability;
  * and it shares no ancestor with any host user model, for the reason `AgentSession` records.
  *
  * @property int $id
- * @property int $user_id
+ * @property string $user_id
  * @property string $harness
  * @property string $machine_label
  * @property list<string> $granted_abilities
- * @property int|null $approved_by
+ * @property string|null $approved_by
  * @property string|null $requested_ip
  * @property Carbon $expires_at
  * @property Carbon|null $revoked_at
@@ -67,9 +67,7 @@ final class Installation extends Model implements AuthenticatableContract
     public function casts(): array
     {
         return [
-            'user_id' => 'integer',
             'granted_abilities' => 'array',
-            'approved_by' => 'integer',
             'expires_at' => 'datetime',
             'revoked_at' => 'datetime',
         ];

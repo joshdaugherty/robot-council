@@ -142,7 +142,7 @@ final class HostUsers
         return GithubIdentity::query()->updateOrCreate(
             ['github_id' => $githubId],
             [
-                'user_id' => $user->getKey(),
+                'user_id' => HostKey::from($user->getKey()),
                 'github_login' => $login,
                 'avatar_url' => $avatarUrl,
             ]
@@ -172,11 +172,15 @@ final class HostUsers
      */
     public function githubIdForKey(mixed $key): ?int
     {
-        if (! \is_int($key) && ! \is_string($key)) {
+        $userId = HostKey::tryFrom($key);
+
+        if ($userId === null) {
             return null;
         }
 
-        $identity = GithubIdentity::query()->where('user_id', $key)->first();
+        // Compared as text, because the column is text: binding an integer against a string column
+        // is a type error on Postgres rather than a miss
+        $identity = GithubIdentity::query()->where('user_id', $userId)->first();
 
         return $identity?->github_id;
     }

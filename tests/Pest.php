@@ -98,6 +98,26 @@ function dateValue(mixed $value): CarbonInterface
 }
 
 /**
+ * Narrow a host user key a test read off a model, which `getKey()` returns untyped.
+ *
+ * Deliberately not `RobotCouncil\Support\HostKey`, which is the production narrowing: a test that
+ * computed its expected value with the code under test would agree with it however wrong both were.
+ *
+ * @param  mixed  $value  The key to narrow.
+ * @return string The key as text.
+ *
+ * @throws RuntimeException When the key is neither an integer nor a string.
+ */
+function keyValue(mixed $value): string
+{
+    if (! is_int($value) && ! is_string($value)) {
+        throw new RuntimeException(sprintf('Expected a host user key, got %s.', get_debug_type($value)));
+    }
+
+    return (string) $value;
+}
+
+/**
  * Narrow a value a test read out of JSON, which arrives untyped.
  *
  * A cast would turn an absent key into an empty string and carry on, so an assertion written

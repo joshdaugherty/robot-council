@@ -33,7 +33,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $approved_at
  * @property Carbon|null $denied_at
  * @property Carbon|null $consumed_at
- * @property int|null $decided_by
+ * @property string|null $decided_by
  * @property Carbon $created_at
  */
 #[Fillable([
@@ -66,7 +66,6 @@ final class DeviceCode extends Model
             'approved_at' => 'datetime',
             'denied_at' => 'datetime',
             'consumed_at' => 'datetime',
-            'decided_by' => 'integer',
         ];
     }
 

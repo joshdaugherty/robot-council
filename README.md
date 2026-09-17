@@ -10,9 +10,8 @@ The core package of Robot Council, a coordination service for fleets of AI codin
 - Laravel 13.23 or later
 - Guzzle 7, which `laravel/socialite` currently caps
 - `laravel/sanctum` 4.3.1 or later, which agent credentials are issued through
-- A `users` table with an integer primary key. The package's own tables store the developer's user
-  key as a `bigint`, so a host keyed by UUID or ULID needs a migration this package does not ship
-  yet ([#37](https://github.com/robot-council/core/issues/37)).
+- A `users` table keyed by an integer, a UUID, or a ULID. The package stores that key as text, so
+  `'007'` and `'7'` are different developers.
 - A `users` table that accepts a row carrying only `name` and `email`. `robot-council:install`
   relaxes the two columns Laravel's own skeleton makes `NOT NULL`; another `NOT NULL` column with no
   default fails the first sign-in ([#36](https://github.com/robot-council/core/issues/36)).

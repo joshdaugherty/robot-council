@@ -11,6 +11,7 @@ use RobotCouncil\Access\Ability;
 use RobotCouncil\Access\Guard;
 use RobotCouncil\Models\DeviceCode;
 use RobotCouncil\Support\DeviceCodes;
+use RobotCouncil\Support\HostKey;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -114,23 +115,13 @@ final class EnrollmentDecisionController
     /**
      * The approving developer's key in the host application's users table.
      *
-     * @return int The developer's key.
+     * @return string The developer's key, as the package stores it.
      *
-     * @throws RuntimeException When the guard has nobody, or the host's key is not a whole number.
+     * @throws RuntimeException When the guard has nobody, or the host's key is not storable.
      */
-    private function developerKey(): int
+    private function developerKey(): string
     {
-        $user = $this->auth->guard($this->guard->name())->user();
-
-        $key = $user?->getAuthIdentifier();
-
-        // The package's own tables store the host's user key as an integer, as the identities
-        // table already does. A host keyed by UUID needs a migration, not a silent cast.
-        if (! \is_int($key) && (! \is_string($key) || ! ctype_digit($key))) {
-            throw new RuntimeException("robot-council stores the host application's user key as an integer, and this one is not.");
-        }
-
-        return (int) $key;
+        return HostKey::from($this->auth->guard($this->guard->name())->user()?->getAuthIdentifier());
     }
 
     /**

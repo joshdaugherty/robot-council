@@ -1,10 +1,13 @@
 # robot-council
 
-A **Laravel package** (`robot-council/core`), not an application. It was scaffolded from `spatie/package-skeleton-laravel` and has no features yet: `src/` holds only the service provider.
+A **Laravel package** (`robot-council/core`), not an application. It is the core of a fleet coordination service for AI coding agents, designed in [robot-council/core#14](https://github.com/robot-council/core/issues/14) and installed into a host Laravel application. GitHub sign-in is the first slice that exists.
 
 ## Layout
 
-- `src/` — namespace `RobotCouncil\`. `RobotCouncilServiceProvider` is built on `spatie/laravel-package-tools` and is auto-discovered by consuming apps through `extra.laravel` in `composer.json`. It registers only the package name so far: no config, migrations, views, commands, or facade.
+- `src/` — namespace `RobotCouncil\`. `RobotCouncilServiceProvider` is built on `spatie/laravel-package-tools` and is auto-discovered by consuming apps through `extra.laravel` in `composer.json`. It registers the config file, the `robot-council:install` command, the web routes, and the `robot-council-admin` ability. Under it: `Access\` (the allowlist), `Console\`, `Http\Controllers\`, `Http\Middleware\`, and `Support\` (the host application's user records).
+- `config/robot-council.php` — the access lists and the route prefix, published to the host application. It is the only place `env()` may be called, which `phpstan.neon.dist` tells Larastan through `configDirectories`.
+- `routes/web.php` — the human-facing routes, mounted by the provider under the configured prefix with the `robot-council.` name prefix.
+- `database/stubs/` — migrations `robot-council:install` writes into the host application, because they change tables the host owns. The suite runs the stub itself, so it is covered.
 - `tests/` — Pest on Orchestra Testbench. `tests/Pest.php` binds `tests/TestCase.php`, which registers the service provider; `tests/ArchTest.php` applies Pest's `php()`, `security()`, and `strict()` arch presets to the package's namespaces. Tests that read data a second database connection commits belong to the `cross-connection` group, which `phpunit.xml.dist` excludes from every run that does not name it; `tests/CrossConnectionTest.php` is the pattern.
 - `.claude/rules/` loads into every session; `.claude/skills/` loads on demand.
 
@@ -17,7 +20,7 @@ A **Laravel package** (`robot-council/core`), not an application. It was scaffol
 | Cross-connection tests | Postgres only: `DB_CONNECTION=pgsql DB_HOST=127.0.0.1 DB_DATABASE=<db> DB_USERNAME=<user> DB_PASSWORD=<password> vendor/bin/pest --group=cross-connection` |
 | Coverage | `composer test-coverage` (needs PCOV or Xdebug; see the `pcov-setup` skill) |
 | Mutation | `vendor/bin/pest --mutate --path=src --class="RobotCouncil\<Class>"` |
-| Static analysis | `composer analyse` (PHPStan with Larastan and `pestphp/pest-plugin-phpstan`, level `max` with bleeding edge, no baseline); PHPStan and Rector both cover `src`, `tests`, and `rector.php` |
+| Static analysis | `composer analyse` (PHPStan with Larastan and `pestphp/pest-plugin-phpstan`, level `max` with bleeding edge, no baseline); PHPStan and Rector both cover `config`, `routes`, `src`, `tests`, and `rector.php` |
 | Format | `vendor/bin/pint --dirty`; check only: `vendor/bin/pint --test` |
 | Refactor | `composer refactor` (Rector; see `rector.php`); check only: `composer test:refactor` |
 
@@ -37,6 +40,9 @@ A **Laravel package** (`robot-council/core`), not an application. It was scaffol
   - Dependabot opens weekly Composer and GitHub Actions update pull requests labeled `dependencies`. Nothing merges them automatically: take each through `pre-merge-check` like any other change.
 - **`main` is guarded by a ruleset**: a pull request, a successful `ci-passed`, and a branch that is up to date with `main`. Enforcement holds only while the ruleset is `active` (`gh api repos/robot-council/core/rulesets`); `pre-merge-check` covers what no check can.
 - **Package classes are `final`, with no `protected` methods.** Pest's `strict()` preset enforces it, so consumers cannot extend them; extension points have to be designed in. A method a parent declares `protected` is widened to `public`, with a per-file Rector skip (see `php-coding-standards`).
+- **`assert()` is unavailable in `src/`.** Pest's `security()` preset bans it, so narrow types with `if` / `throw` instead (see `php-coding-standards`).
+- **`laravel/socialite` caps Guzzle at 7 for host applications.** Socialite v5.31.0 requires `league/oauth1-client ^1.11`, which allows only Guzzle 6 or 7, while Laravel 13 allows `^7.8.2 || ^8.0`. Installing this package therefore resolves Guzzle 7 in the host application, until Socialite allows `league/oauth1-client` 2.x.
+- **Tests boot Socialite's provider by hand.** A host application discovers it through Composer, while Testbench registers only what `tests/TestCase.php` lists.
 - **The repository belongs to the `robot-council` GitHub organization**, which enables the `Task`, `Bug`, and `Feature` issue types. It moved from `joshdaugherty/robot-council` on 2026-09-17, and old URLs redirect, so links in earlier issues, pull requests, and the `v0.1.0` release still resolve.
 - **Never disclose an exploitable vulnerability in a public issue or PR.** Use a draft security advisory, per the `security-audit` skill.
 

@@ -115,7 +115,7 @@ what makes it correct:
    `Correct`/`Harden`/`Stop`/`Avoid`.
 6. **Maintenance and tooling** — the diff is confined to tooling (`.github/`, `.claude/`, `tests/`,
    `workbench/`, `composer.json`, `phpstan.neon.dist`, `phpstan-baseline.neon`, `phpunit.xml.dist`, `rector.php`,
-   top-level dotfiles, `CHANGELOG.md`, `README.md`, `LICENSE.md`); or it adds more lines under
+   top-level dotfiles, `CHANGELOG.md`, `CLAUDE.md`, `README.md`, `LICENSE.md`); or it adds more lines under
    `tests/` than elsewhere; or the title opens with a maintenance verb (`Refactor`, `Bump`,
    `Document`, …) or names tests, coverage, mutation, a skill, or a worktree.
 7. **What's new** — everything else.
@@ -124,10 +124,14 @@ what makes it correct:
 
 Don't hand-assemble the buckets — run the bundled generator. It reads first-parent git history
 for a ref range, pulls each PR's title **live from the GitHub API** (`gh`), and applies every
-rule above: prefix/`[skip ci]`/merge-hint stripping, acronym casing, the routing cascade, `&`→and
-with the Oxford comma, `[#N]` PR links, and backticked-short-SHA links for direct commits. It skips
-changelog pull requests titled `Update CHANGELOG for vX.Y.Z`. It depends only on `git`, `gh`, and
-Python 3 (3.9 or later) — no other setup.
+rule above: prefix/`[skip ci]`/merge-hint stripping, acronym casing of a direct commit's subject
+(never of a PR title, which is used as written, and never of a dotted name, a path, or a code
+span), the routing cascade, `&`→and with the Oxford comma, `[#N]` PR links, and
+backticked-short-SHA links for direct commits. It skips changelog pull requests titled
+`Update CHANGELOG for vX.Y.Z`. It depends only on `git`, `gh`, and Python 3 (3.9 or later) — no
+other setup. Its title cleanup and routing are tested offline by
+[`test_gen_release_notes.py`](test_gen_release_notes.py):
+`python3 -m unittest discover -s .claude/skills/writing-release-notes`.
 
 The **editorial** parts it can't infer are passed as flags: the one-sentence `--lead`, the
 `--breaking` callout impact, and any `--breaking-item` bullets (`--exclude` a PR itemized there

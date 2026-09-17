@@ -12,7 +12,8 @@ so it depends on nothing but `git`, `gh`, and Python 3.
 Because PR titles are held to house style by the `writing-pull-requests`
 skill, the live titles are already clean; this tool only strips residual noise
 (Conventional-Commit prefixes, `[skip ci]` litter, merge-order hints, redundant
-`(#NNN)` refs), fixes acronym casing, drops `&`, and applies the Oxford comma.
+`(#NNN)` refs), drops `&`, and applies the Oxford comma. Acronym casing applies only to a
+direct commit's subject, never to a PR title, which is used as written.
 Changelog pull requests (`Update CHANGELOG for vX.Y.Z`) are skipped.
 
 Usage:
@@ -66,19 +67,32 @@ _ACRO = {"composer": "Composer", "json-ld": "JSON-LD", "cli": "CLI",
          "mcp": "MCP", "laravel": "Laravel", "larastan": "Larastan",
          "phpstan": "PHPStan", "rector": "Rector", "vite": "Vite", "ssr": "SSR", "ssg": "SSG",
          "seo": "SEO"}
-_ACRO_RE = re.compile(r"\b(" + "|".join(re.escape(k) for k in _ACRO) + r")\b", re.I)
+# A key counts only as a standalone word. One touching `.`, `/`, `-`, or `_` is part of a
+# name -- `rector.php`, `composer.json`, `src/Rector`, `laravel-ray` -- and a name keeps its
+# spelling. So does anything inside a backticked code span, which fix_acro() skips.
+_ACRO_RE = re.compile(
+    r"(?<![\w./-])(" + "|".join(re.escape(k) for k in _ACRO) + r")(?![\w/-]|\.\w)", re.I)
 
 
 def fix_acro(s):
-    return _ACRO_RE.sub(lambda m: _ACRO.get(m.group(0).lower(), m.group(0)), s)
+    # Even-indexed segments are outside backticks; odd-indexed ones are code spans.
+    segments = s.split("`")
+    for i in range(0, len(segments), 2):
+        segments[i] = _ACRO_RE.sub(lambda m: _ACRO.get(m.group(0).lower(), m.group(0)), segments[i])
+    return "`".join(segments)
 
 
-def clean_title(t):
-    """Normalize a raw commit subject into a house-style bullet title."""
+def clean_title(t, recase=True):
+    """Normalize a title into a house-style bullet title.
+
+    `recase` is for a direct commit's subject only. A PR title is already held to house style
+    by `writing-pull-requests`, and the skill requires it as written, so acronym casing would
+    only damage it: a lowercase `php` preset name becomes `PHP`.
+    """
     t = re.sub(r"^(feat|fix|perf|chore|docs|build|ci|test|style|refactor)(\([^)]*\))?:\s*", "", t)
     t = re.sub(r"\s*\((?:merge (?:after|before) #\d+)\)", "", t, flags=re.I)
     t = re.sub(r"\s*\(#\d+(?:\s*[,&–-]\s*#?\d+)*\)", "", t)
-    t = fix_acro(t.strip())
+    t = fix_acro(t.strip()) if recase else t.strip()
     return (t[0].upper() + t[1:]) if t and t[0].islower() else t
 
 
@@ -104,7 +118,7 @@ LABEL_SEC = {"security"}
 # dotfiles (`.editorconfig`, `.gitattributes`, `.gitignore`) count too; see _is_maint.
 MAINT_PREFIXES = (".github/", ".claude/", "tests/", "workbench/")
 MAINT_FILES = {"composer.json", "phpstan.neon.dist", "phpstan-baseline.neon", "phpunit.xml.dist", "rector.php",
-               "CHANGELOG.md", "README.md", "LICENSE.md"}
+               "CHANGELOG.md", "CLAUDE.md", "README.md", "LICENSE.md"}
 
 # Published, consumer-visible surfaces of the package: what an application installing it
 # receives through config publishing, migrations, factories, views, and routes. A change
@@ -335,7 +349,7 @@ def main():
             continue
         if pr is None:  # direct commit -> link the short SHA
             link = f"[`{sha[:7]}`](https://github.com/{a.repo}/commit/{sha})"
-        disp = scrub(clean_title(title))
+        disp = scrub(clean_title(title, recase=pr is None))
         if not disp:
             continue
         paths, test_lines, other_lines = diff_signals(sha)

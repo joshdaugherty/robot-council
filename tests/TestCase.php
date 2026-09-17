@@ -50,6 +50,10 @@ class TestCase extends Orchestra
      */
     protected function defineEnvironment($app)
     {
+        // Sessions and cookies are encrypted, so the application needs a key of its own. Not
+        // Testbench's `.env`, which only exists once something has copied `.env.example` over.
+        $app['config']->set('app.key', 'base64:AckfSECXIvnK5r28GVIWUAxmbBSjTsmFAckfSECXIvk=');
+
         // The cookie session handler has no request in tests, so sessions live in memory
         $app['config']->set('session.driver', 'array');
 

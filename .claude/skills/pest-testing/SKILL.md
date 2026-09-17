@@ -24,7 +24,7 @@ differently) and its source under `vendor/pestphp/pest/src` and
 - Tests live directly in `tests/` as `*Test.php` files (`phpunit.xml.dist` defines one suite over
   `tests`). There is no `Feature/` / `Unit/` split yet.
 - `tests/Pest.php` does `pest()->extend(TestCase::class)->in(__DIR__)`, so every test file runs on
-  `JoshDaugherty\RobotCouncil\Tests\TestCase`, which extends `Orchestra\Testbench\TestCase` and
+  `RobotCouncil\Tests\TestCase`, which extends `Orchestra\Testbench\TestCase` and
   registers `RobotCouncilServiceProvider`. The package is booted inside a Testbench application
   in every test; `$this->app`, facades, and `$this->artisan()` are available.
 - `tests/ArchTest.php` holds the architecture tests: Pest's `php()`, `security()`, and `strict()`
@@ -148,7 +148,7 @@ Architecture tests enforce code conventions. Add them to `tests/ArchTest.php`:
 
 ```php
 arch('commands extend the framework command')
-    ->expect('JoshDaugherty\RobotCouncil\Commands')
+    ->expect('RobotCouncil\Commands')
     ->toExtend('Illuminate\Console\Command');
 ```
 

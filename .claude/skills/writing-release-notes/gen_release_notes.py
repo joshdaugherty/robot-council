@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate a GitHub Release note body for `joshdaugherty/robot-council` per the
+Generate a GitHub Release note body for `robot-council/core` per the
 `writing-release-notes` skill: em-dash-title-ready, milestone lead + optional
 breaking-change callout, a closed heading vocabulary, and one linked bullet per
 change (a `[#N]` PR link, or a backticked short SHA for a direct commit).
@@ -29,7 +29,7 @@ Example (cut v0.3.0 from the previous tag):
   gh release create v0.3.0 --title 'v0.3.0 — Theme' --notes-file body.md --verify-tag
 
 Options:
-  --repo O/R          GitHub repo (default: joshdaugherty/robot-council)
+  --repo O/R          GitHub repo (default: robot-council/core)
   --lead TEXT         one-sentence milestone lead (recommended; else a TODO placeholder)
   --breaking TEXT     impact/action for the "**Breaking change** —" callout paragraph
   --breaking-item T   an itemized "## Breaking changes" bullet (repeatable)
@@ -38,7 +38,7 @@ Options:
 """
 import argparse, json, re, subprocess, sys
 
-DEFAULT_REPO = "joshdaugherty/robot-council"
+DEFAULT_REPO = "robot-council/core"
 
 
 def sh(args):

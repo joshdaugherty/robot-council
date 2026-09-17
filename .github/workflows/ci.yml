@@ -116,12 +116,63 @@ jobs:
       - name: Run Rector (dry run)
         run: vendor/bin/rector --dry-run --no-progress-bar
 
+  # The suite on Postgres, then the `cross-connection` group, which `phpunit.xml.dist` excludes
+  # everywhere else: each connection to SQLite's in-memory database opens a separate database.
+  # GitHub runs service containers only on Linux runners, so this job is ubuntu-only.
+  postgres:
+    name: postgres
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: robot_council
+          POSTGRES_USER: robot_council
+          POSTGRES_PASSWORD: robot_council
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --username=robot_council --dbname=robot_council"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: robot_council
+      DB_USERNAME: robot_council
+      DB_PASSWORD: robot_council
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, pdo_pgsql, bcmath, intl, fileinfo
+          coverage: none
+
+      - name: Install composer dependencies
+        uses: ramsey/composer-install@v4
+
+      - name: List Installed Dependencies
+        run: composer show -D
+
+      - name: Execute tests
+        run: vendor/bin/pest --ci
+
+      - name: Execute cross-connection tests
+        run: vendor/bin/pest --ci --group=cross-connection
+
   # The one check the `main` ruleset requires. It always runs, and it passes only when every
   # job above succeeded, so a failed, cancelled, or skipped job all block the merge.
   ci-passed:
     name: ci-passed
     if: always()
-    needs: [tests, phpstan, pint, rector]
+    needs: [tests, phpstan, pint, rector, postgres]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -131,6 +182,7 @@ jobs:
           PHPSTAN: ${{ needs.phpstan.result }}
           PINT: ${{ needs.pint.result }}
           RECTOR: ${{ needs.rector.result }}
+          POSTGRES: ${{ needs.postgres.result }}
         run: |
-          echo "tests=$TESTS phpstan=$PHPSTAN pint=$PINT rector=$RECTOR"
-          [ "$TESTS" = success ] && [ "$PHPSTAN" = success ] && [ "$PINT" = success ] && [ "$RECTOR" = success ]
+          echo "tests=$TESTS phpstan=$PHPSTAN pint=$PINT rector=$RECTOR postgres=$POSTGRES"
+          [ "$TESTS" = success ] && [ "$PHPSTAN" = success ] && [ "$PINT" = success ] && [ "$RECTOR" = success ] && [ "$POSTGRES" = success ]

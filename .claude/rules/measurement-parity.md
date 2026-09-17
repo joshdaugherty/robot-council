@@ -12,13 +12,14 @@ Before you compare a measurement against a prior one, such as a suite time, a CI
    - runs `composer update --prefer-lowest|--prefer-stable --prefer-dist`
    - runs `vendor/bin/pest --ci`
 
-   The `phpstan` job runs on PHP 8.5. Setup steps live in the harness, not in the sentence someone wrote about it.
+   The `postgres` job is a second test harness. It runs on ubuntu with PHP 8.5, `pdo_pgsql`, and a `postgres:17` service container, and runs `vendor/bin/pest --ci` with `DB_CONNECTION=pgsql` and the `DB_*` variables set in the job, then `vendor/bin/pest --ci --group=cross-connection`. The `phpstan` job runs on PHP 8.5. Setup steps live in the harness, not in the sentence someone wrote about it.
 
 2. **Enumerate the parity checklist, and log it in the run.** For this package:
    - **PHP version and loaded extensions.** CI runs PHP 8.5 and 8.4 (PHPStan runs 8.5 only), with the listed extensions and **no coverage driver**. Local Herd PHP 8.4.23 loads **PCOV** (enabled, with `pcov.directory` resolved to `src`) plus extensions CI does not have. Compare `php -v` and `php -m` on both sides.
    - **Resolved dependency versions.** No `composer.lock` is committed. CI resolves dependencies on the day it runs, at `prefer-lowest` or `prefer-stable`, while your local `vendor/` reflects whatever your gitignored lock resolved at your last update. Compare CI's `List Installed Dependencies` step (`composer show -D`, direct dependencies only) with a local `composer show -D`. Transitive versions need a full `composer show`.
    - **Laravel and Testbench.** CI pins `laravel/framework` 13.* with Testbench `^11.2.0`. A local install resolved Laravel 13.32.0 and Testbench 11.2.0 as of 2026-09-17.
    - **OS.** CI runs ubuntu and windows; local is macOS.
+   - **Database.** The `tests` matrix and a plain local `composer test` run on Testbench's in-memory SQLite `testing` connection. The `postgres` job runs on the `postgres:17` image, a floating tag, and it alone runs the `cross-connection` group. A result from one database is not a baseline for the other.
    - **Pest flags and environment.** Read in Pest 5.2.1: under `--ci`, `->only()` no longer narrows the run, and `skipOnCI()` and `skipLocally()` flip on either `--ci` or the mere presence of `CI`, `GITHUB_ACTIONS` (both set by Actions), or 17 other CI variables. `phpunit.xml.dist` sets `executionOrder="random"`. The summary prints `Random Order Seed:`, and `--random-order-seed=<n>` repeats that order.
    - **The same commit, and the same bytes under `vendor/`** (step 3).
    - **A quiet machine**, checked per [`long-running-commands`](long-running-commands.md).

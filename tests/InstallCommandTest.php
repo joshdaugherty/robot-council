@@ -16,6 +16,19 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 
 /**
+ * Sanctum's tokens migrations the command has published into a database path.
+ *
+ * @param  string  $databasePath  The application's database path for this test.
+ * @return list<string> Absolute paths of the migrations found, in glob order.
+ */
+function publishedSanctumMigrations(string $databasePath): array
+{
+    $found = File::glob($databasePath.'/migrations/*_create_personal_access_tokens_table.php');
+
+    return array_values(array_filter($found, is_string(...)));
+}
+
+/**
  * The users-columns migrations the command has written into a database path.
  *
  * @param  string  $databasePath  The application's database path for this test.
@@ -100,4 +113,49 @@ it('leaves a column that already admits null alone', function (): void {
     DB::table('users')->insert(['name' => 'octodev']);
 
     expect(DB::table('users')->count())->toBe(1);
+});
+
+it("publishes Sanctum's tokens migration, which the host owns", function (): void {
+    $databasePath = $this->useTemporaryDatabasePath();
+
+    expect(Artisan::call('robot-council:install'))->toBe(0);
+
+    $published = publishedSanctumMigrations($databasePath);
+
+    expect($published)->toHaveCount(1)
+        ->and(File::get($published[0]))->toContain('personal_access_tokens')
+        ->and(\dirname($published[0], 2))->toBe($databasePath);
+});
+
+it("publishes Sanctum's migration once, even when a re-run would rename it", function (): void {
+    $databasePath = $this->useTemporaryDatabasePath();
+
+    // What the Laravel skeleton sets: a publish rewrites the timestamp, so a second run would
+    // arrive under a new name and leave the host with two migrations creating one table
+    config()->set('database.migrations.update_date_on_publish', true);
+
+    expect(Artisan::call('robot-council:install'))->toBe(0);
+
+    $first = publishedSanctumMigrations($databasePath);
+
+    $this->travel(2)->days();
+
+    expect(Artisan::call('robot-council:install'))->toBe(0)
+        ->and(publishedSanctumMigrations($databasePath))->toBe($first);
+});
+
+it('reports a sanctum expiration that would cut agent credentials off', function (): void {
+    $this->useTemporaryDatabasePath();
+
+    config()->set('sanctum.expiration', 60);
+
+    expect(Artisan::call('robot-council:install'))->toBe(1)
+        ->and(Artisan::output())->toContain('sanctum.expiration');
+});
+
+it('succeeds while sanctum expiration is null', function (): void {
+    $this->useTemporaryDatabasePath();
+
+    expect(config('sanctum.expiration'))->toBeNull()
+        ->and(Artisan::call('robot-council:install'))->toBe(0);
 });

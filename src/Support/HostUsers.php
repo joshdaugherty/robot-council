@@ -129,9 +129,26 @@ final class HostUsers
      */
     public function githubId(Authenticatable $user): ?int
     {
-        $identity = GithubIdentity::query()
-            ->where('user_id', $user->getAuthIdentifier())
-            ->first();
+        return $this->githubIdForKey($user->getAuthIdentifier());
+    }
+
+    /**
+     * Read the GitHub user ID recorded against a key in the host's users table.
+     *
+     * Used where the developer is known by key rather than as a signed-in user: an installation
+     * and an agent session each record the developer they belong to, and every request they make
+     * is checked against the access lists again.
+     *
+     * @param  mixed  $key  The user's primary key, as the host's model types it.
+     * @return int|null The account's GitHub user ID, or null when no identity points at that key.
+     */
+    public function githubIdForKey(mixed $key): ?int
+    {
+        if (! \is_int($key) && ! \is_string($key)) {
+            return null;
+        }
+
+        $identity = GithubIdentity::query()->where('user_id', $key)->first();
 
         return $identity?->github_id;
     }

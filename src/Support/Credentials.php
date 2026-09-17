@@ -1,0 +1,136 @@
+<?php
+
+declare(strict_types=1);
+
+namespace RobotCouncil\Support;
+
+use Illuminate\Contracts\Config\Repository;
+use Illuminate\Support\Carbon;
+
+/**
+ * How long each credential lives, read from `robot-council.credentials` on every call so a host
+ * that changes a lifetime does not have to restart anything.
+ *
+ * Every value is bounded here rather than trusted from configuration, because a zero or negative
+ * lifetime would issue a credential that is already expired, and an unbounded device-code lifetime
+ * would leave an approvable code waiting for a phishing victim for as long as the typo allowed.
+ */
+final class Credentials
+{
+    /**
+     * The longest a device code may live, whatever configuration asks for.
+     */
+    public const int MAX_DEVICE_CODE_TTL_SECONDS = 600;
+
+    /**
+     * @param  Repository  $config  The host application's configuration repository.
+     */
+    public function __construct(private readonly Repository $config) {}
+
+    /**
+     * How long an installation credential lives before it has to be approved again.
+     *
+     * @return int The maximum age in days, at least one.
+     */
+    public function installationMaxAgeDays(): int
+    {
+        return $this->bounded('credentials.installation_max_age_days', 30);
+    }
+
+    /**
+     * How long a session token lives before the helper has to renew it.
+     *
+     * @return int The lifetime in minutes, at least one.
+     */
+    public function sessionTtlMinutes(): int
+    {
+        return $this->bounded('credentials.session_ttl_minutes', 60);
+    }
+
+    /**
+     * How long a device code may be approved and exchanged.
+     *
+     * @return int The lifetime in seconds, at least one and never above the ten-minute ceiling.
+     */
+    public function deviceCodeTtlSeconds(): int
+    {
+        return min(
+            $this->bounded('credentials.device_code_ttl_seconds', self::MAX_DEVICE_CODE_TTL_SECONDS),
+            self::MAX_DEVICE_CODE_TTL_SECONDS
+        );
+    }
+
+    /**
+     * How long the enrollment helper is told to wait between polls of the token endpoint.
+     *
+     * @return int The interval in seconds, at least one.
+     */
+    public function deviceCodeIntervalSeconds(): int
+    {
+        return $this->bounded('credentials.device_code_interval_seconds', 5);
+    }
+
+    /**
+     * When an installation approved now would expire.
+     *
+     * @return Carbon The installation's expiry.
+     */
+    public function installationExpiry(): Carbon
+    {
+        return Carbon::now()->addDays($this->installationMaxAgeDays());
+    }
+
+    /**
+     * When a session token issued now would expire.
+     *
+     * @return Carbon The token's expiry.
+     */
+    public function sessionTokenExpiry(): Carbon
+    {
+        return Carbon::now()->addMinutes($this->sessionTtlMinutes());
+    }
+
+    /**
+     * When a device code requested now would expire.
+     *
+     * @return Carbon The code's expiry.
+     */
+    public function deviceCodeExpiry(): Carbon
+    {
+        return Carbon::now()->addSeconds($this->deviceCodeTtlSeconds());
+    }
+
+    /**
+     * How many attempts per minute one rate limit allows.
+     *
+     * @param  string  $key  The key under `robot-council.rate_limits`.
+     * @param  int  $default  The value to use when configuration holds nothing usable.
+     * @return int The configured limit, at least one.
+     */
+    public function rateLimit(string $key, int $default): int
+    {
+        return $this->bounded('rate_limits.'.$key, $default);
+    }
+
+    /**
+     * Read one bounded whole number, falling back to the default for anything that is not a
+     * positive one. Configuration arrives from the environment as a string, and an unset or
+     * mistyped variable casts to zero.
+     *
+     * @param  string  $key  The key under `robot-council`.
+     * @param  int  $default  The value to use when configuration holds nothing usable.
+     * @return int The configured value, or the default.
+     */
+    private function bounded(string $key, int $default): int
+    {
+        $configured = $this->config->get('robot-council.'.$key);
+
+        if (! \is_int($configured) && (! \is_string($configured) || ! ctype_digit($configured))) {
+            return $default;
+        }
+
+        $value = (int) $configured;
+
+        return $value >= 1 ? $value : $default;
+    }
+}

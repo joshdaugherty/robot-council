@@ -44,15 +44,87 @@ return [
     | Routes
     |--------------------------------------------------------------------------
     |
-    | Where the package mounts its human-facing routes in the host application,
-    | and the middleware group they run in. The routes need a session, so the
-    | group has to start a session and verify CSRF tokens.
+    | Where the package mounts its routes in the host application, and the
+    | middleware groups they run in. The human-facing routes need a session, so
+    | that group has to start a session and verify CSRF tokens. The machine
+    | routes are stateless and carry a bearer token instead.
     |
     */
 
     'routes' => [
         'web_prefix' => env('ROBOT_COUNCIL_WEB_PREFIX', 'robot-council'),
         'web_middleware' => ['web'],
+        'api_prefix' => env('ROBOT_COUNCIL_API_PREFIX', 'robot-council/api'),
+
+        // Deliberately not `['api']`. These endpoints are stateless and bring their own
+        // throttling, and an application's `api` group is not: `statefulApi()` prepends Sanctum's
+        // `EnsureFrontendRequestsAreStateful`, which promotes a request whose origin is on
+        // `sanctum.stateful` into a session request and answers the unauthenticated device
+        // endpoints with 419, while `throttleApi()` re-keys them on the caller's address. Add this
+        // application's own middleware here if it needs to run.
+        'api_middleware' => [],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Credentials
+    |--------------------------------------------------------------------------
+    |
+    | How long each credential lives. A developer approves an installation --
+    | one harness on one machine -- once, and that installation starts a session
+    | per agent process. Session tokens are short and renew without a human, so
+    | a leaked one is useful for minutes rather than weeks.
+    |
+    | Leave `sanctum.expiration` null. Sanctum measures it from a token's
+    | `created_at`, so it would cut off a renewed session token regardless of the
+    | token's own expiry; `robot-council:install` reports a non-null value.
+    |
+    */
+
+    'credentials' => [
+        'installation_max_age_days' => (int) env('ROBOT_COUNCIL_INSTALLATION_MAX_AGE_DAYS', 30),
+        'session_ttl_minutes' => (int) env('ROBOT_COUNCIL_SESSION_TTL_MINUTES', 60),
+
+        // RFC 8628 puts no ceiling on a device code's lifetime; ten minutes is
+        // this package's, and a larger value is clamped to it.
+        'device_code_ttl_seconds' => (int) env('ROBOT_COUNCIL_DEVICE_CODE_TTL_SECONDS', 600),
+
+        // What the enrollment helper is told to wait between polls.
+        'device_code_interval_seconds' => (int) env('ROBOT_COUNCIL_DEVICE_CODE_INTERVAL_SECONDS', 5),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Schedule
+    |--------------------------------------------------------------------------
+    |
+    | Whether the package adds its hourly prune of expired device codes to this
+    | application's schedule. Turn it off to run `robot-council:prune-device-codes`
+    | on another schedule, or from something other than Laravel's scheduler.
+    |
+    */
+
+    'schedule' => [
+        'prune_device_codes' => true,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rate limits
+    |--------------------------------------------------------------------------
+    |
+    | Attempts per minute, each against the subject named by its key. The token
+    | endpoint is limited twice, because a helper polling every few seconds is
+    | ordinary traffic while thousands of device codes from one address are not.
+    |
+    */
+
+    'rate_limits' => [
+        'device_code_per_ip' => (int) env('ROBOT_COUNCIL_RATE_DEVICE_CODE_PER_IP', 10),
+        'device_token_per_code' => (int) env('ROBOT_COUNCIL_RATE_DEVICE_TOKEN_PER_CODE', 30),
+        'device_token_per_ip' => (int) env('ROBOT_COUNCIL_RATE_DEVICE_TOKEN_PER_IP', 120),
+        'verification_per_user' => (int) env('ROBOT_COUNCIL_RATE_VERIFICATION_PER_USER', 20),
+        'sessions_per_installation' => (int) env('ROBOT_COUNCIL_RATE_SESSIONS_PER_INSTALLATION', 60),
     ],
 
 ];

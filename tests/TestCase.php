@@ -9,17 +9,28 @@ use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\Sanctum;
+use Laravel\Sanctum\SanctumServiceProvider;
 use Laravel\Socialite\SocialiteServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
+use ReflectionClass;
+use RobotCouncil\Access\Ability;
+use RobotCouncil\Models\AgentSession;
+use RobotCouncil\Models\AgentSessionStatus;
 use RobotCouncil\Models\GithubIdentity;
+use RobotCouncil\Models\Installation;
 use RobotCouncil\RobotCouncilServiceProvider;
+use RobotCouncil\Support\AgentSessions;
+use RobotCouncil\Support\Credentials;
+use RobotCouncil\Support\Installations;
+use RuntimeException;
 
 use function Orchestra\Testbench\default_migration_path;
 
 /**
  * Base test case: boots a Testbench application with the package's service provider registered,
  * and provides the fixtures the suite shares — a users table carrying the package's columns,
- * throwaway directories, and the access lists.
+ * throwaway directories, the access lists, and enrolled installations and agent sessions.
  */
 class TestCase extends Orchestra
 {
@@ -39,8 +50,9 @@ class TestCase extends Orchestra
     protected function getPackageProviders($app)
     {
         return [
-            // A host application discovers Socialite's provider through Composer; Testbench does not
+            // A host application discovers these through Composer; Testbench does not
             SocialiteServiceProvider::class,
+            SanctumServiceProvider::class,
             RobotCouncilServiceProvider::class,
         ];
     }
@@ -112,9 +124,9 @@ class TestCase extends Orchestra
     }
 
     /**
-     * Drop whatever the last test left behind, then migrate Laravel's tables, the package's own,
-     * and any extra paths. A shared database keeps its rows between tests, unlike SQLite's
-     * in-memory one, so every database test starts from here.
+     * Drop whatever the last test left behind, then migrate Laravel's tables, Sanctum's, the
+     * package's own, and any extra paths. A shared database keeps its rows between tests, unlike
+     * SQLite's in-memory one, so every database test starts from here.
      *
      * @param  string  ...$paths  Extra migration directories to run, in migration-name order.
      */
@@ -123,11 +135,27 @@ class TestCase extends Orchestra
         Artisan::call('migrate:fresh', [
             '--path' => [
                 default_migration_path(),
+
+                // A host application publishes this one with `robot-council:install`
+                $this->sanctumMigrationPath(),
                 __DIR__.'/../database/migrations',
                 ...$paths,
             ],
             '--realpath' => true,
         ]);
+    }
+
+    /**
+     * Where Sanctum keeps the migration a host publishes.
+     *
+     * Resolved from the installed class rather than written out, so moving or renaming the vendor
+     * directory fails here instead of silently migrating one table fewer.
+     *
+     * @return string The absolute path to Sanctum's migrations directory.
+     */
+    protected function sanctumMigrationPath(): string
+    {
+        return \dirname((string) new ReflectionClass(Sanctum::class)->getFileName(), 2).'/database/migrations';
     }
 
     /**
@@ -186,5 +214,149 @@ class TestCase extends Orchestra
     {
         config()->set('robot-council.access.developers', implode(',', $developers));
         config()->set('robot-council.access.admins', implode(',', $admins));
+    }
+
+    /**
+     * Create an approved installation for a developer, as the device-code flow would.
+     *
+     * @param  User  $user  The developer who approved it.
+     * @param  list<string>  $abilities  The abilities its session tokens carry.
+     * @param  string  $machineLabel  The label the requester claimed.
+     * @return Installation The saved installation.
+     */
+    protected function approveInstallation(User $user, array $abilities = [], string $machineLabel = 'workbench'): Installation
+    {
+        $abilities = $abilities === [] ? [Ability::TasksCreate->value, Ability::EventsPost->value] : $abilities;
+
+        return Installation::query()->create([
+            'user_id' => $user->getKey(),
+            'harness' => 'claude-code',
+            'machine_label' => $machineLabel,
+            'granted_abilities' => $abilities,
+            'approved_by' => $user->getKey(),
+            'requested_ip' => '203.0.113.10',
+            'expires_at' => $this->credentials()->installationExpiry(),
+        ]);
+    }
+
+    /**
+     * Issue an installation's credential, exactly as the token endpoint does.
+     *
+     * @param  Installation  $installation  The installation to credential.
+     * @return string The plaintext credential.
+     */
+    protected function installationCredential(Installation $installation): string
+    {
+        return $installation->createToken(
+            Installations::CREDENTIAL_NAME,
+            [Ability::SessionsStart->value],
+            $installation->expires_at
+        )->plainTextToken;
+    }
+
+    /**
+     * Start an agent session under an installation, as the session endpoint does.
+     *
+     * @param  Installation  $installation  The installation to start it under.
+     * @return array{AgentSession, string} The session and its plaintext token.
+     */
+    protected function startAgentSession(Installation $installation): array
+    {
+        $issued = $this->service(AgentSessions::class)->start($installation, null);
+
+        return [$issued->owner, $issued->plainTextToken];
+    }
+
+    /**
+     * The headers a machine sends: a bearer token, and a request for JSON.
+     *
+     * @param  string  $token  The plaintext bearer token.
+     * @return array<string, string> The headers.
+     */
+    protected function bearer(string $token): array
+    {
+        return [
+            'Authorization' => 'Bearer '.$token,
+            'Accept' => 'application/json',
+        ];
+    }
+
+    /**
+     * Make the next request as a machine holding this token.
+     *
+     * The forgotten guards are load-bearing. `Illuminate\Auth\RequestGuard::user()` caches the
+     * principal it resolved, and one test process keeps one application across every request it
+     * makes, so a second request in the same test would otherwise be answered as whoever the first
+     * one authenticated -- a revoked token would keep working, and another installation's
+     * credential would arrive as this one's. A real request boots its own application, and Octane
+     * flushes the same state between requests.
+     *
+     * @param  string  $token  The plaintext bearer token.
+     * @return $this The test case, with the machine's headers set.
+     */
+    protected function machine(string $token): static
+    {
+        $this->app?->make('auth')->forgetGuards();
+
+        return $this->withHeaders($this->bearer($token));
+    }
+
+    /**
+     * Mark an agent session as gone, without going through revocation.
+     *
+     * @param  AgentSession  $session  The session to end.
+     */
+    protected function markSessionGone(AgentSession $session): void
+    {
+        $session->forceFill(['status' => AgentSessionStatus::Gone])->save();
+    }
+
+    /**
+     * The booted application.
+     *
+     * @return Application The container, which is only null before a test boots one.
+     *
+     * @throws RuntimeException When the application has not booted.
+     */
+    protected function container(): Application
+    {
+        $app = $this->app;
+
+        if ($app === null) {
+            throw new RuntimeException('The application was not booted.');
+        }
+
+        return $app;
+    }
+
+    /**
+     * Resolve a service out of the booted application.
+     *
+     * @template TService of object
+     *
+     * @param  class-string<TService>  $abstract  The class to resolve.
+     * @return TService The resolved service.
+     *
+     * @throws RuntimeException When the application has not booted.
+     */
+    protected function service(string $abstract): object
+    {
+        $service = $this->container()->make($abstract);
+
+        if (! $service instanceof $abstract) {
+            throw new RuntimeException(sprintf('The container returned something other than %s.', $abstract));
+        }
+
+        return $service;
+    }
+
+    /**
+     * The configured lifetimes.
+     *
+     * @return Credentials The credentials reader.
+     */
+    protected function credentials(): Credentials
+    {
+        return $this->service(Credentials::class);
     }
 }

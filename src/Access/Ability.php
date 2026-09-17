@@ -1,0 +1,101 @@
+<?php
+
+declare(strict_types=1);
+
+namespace RobotCouncil\Access;
+
+/**
+ * The fixed list of abilities a token may carry. Sanctum treats `*` as every ability, so the
+ * package never grants it: an ability that is not on this list cannot be requested, granted, or
+ * checked into existence later.
+ */
+enum Ability: string
+{
+    /**
+     * Start and renew agent sessions. The only ability an installation credential carries.
+     */
+    case SessionsStart = 'sessions:start';
+
+    /**
+     * Create tasks for the fleet.
+     */
+    case TasksCreate = 'tasks:create';
+
+    /**
+     * Claim a task and work it.
+     */
+    case TasksClaim = 'tasks:claim';
+
+    /**
+     * Take a lock over a file or a resource.
+     */
+    case LocksAcquire = 'locks:acquire';
+
+    /**
+     * Post narration to the event feed.
+     */
+    case EventsPost = 'events:post';
+
+    /**
+     * Direct other developers' agents: release, reassign, or cancel any task, and post directives.
+     * An admin grants it after enrollment, and it can never be requested.
+     */
+    case CoordinatorDirect = 'coordinator:direct';
+
+    /**
+     * The abilities an enrollment request may ask for.
+     *
+     * @return list<self> Every ability except the installation's own and the coordinator's.
+     */
+    public static function requestable(): array
+    {
+        return [
+            self::TasksCreate,
+            self::TasksClaim,
+            self::LocksAcquire,
+            self::EventsPost,
+        ];
+    }
+
+    /**
+     * The abilities an admin may grant to an installation after enrollment.
+     *
+     * @return list<self> The requestable abilities, plus the coordinator's.
+     */
+    public static function grantable(): array
+    {
+        return [...self::requestable(), self::CoordinatorDirect];
+    }
+
+    /**
+     * Narrow what an enrollment asked for to what the server is willing to grant.
+     *
+     * The requested list is read from the stored row, never from the request that approves it, so
+     * an ability added to an approval POST reaches nothing. Anything outside the requestable list
+     * -- `*`, an unknown name, or the coordinator's -- is dropped rather than refused, because the
+     * request that carried it was already validated when the code was issued.
+     *
+     * @param  list<string>  $requested  The abilities the enrollment asked for.
+     * @return list<string> The abilities to grant, without duplicates.
+     */
+    public static function granted(array $requested): array
+    {
+        $requestable = self::values(self::requestable());
+
+        return array_values(array_unique(array_filter(
+            $requested,
+            static fn (string $ability): bool => \in_array($ability, $requestable, true)
+        )));
+    }
+
+    /**
+     * Reduce a list of abilities to their string values.
+     *
+     * @param  list<self>  $abilities  The abilities to convert.
+     * @return list<string> The abilities as they are stored on a token.
+     */
+    public static function values(array $abilities): array
+    {
+        return array_map(static fn (self $ability): string => $ability->value, $abilities);
+    }
+}

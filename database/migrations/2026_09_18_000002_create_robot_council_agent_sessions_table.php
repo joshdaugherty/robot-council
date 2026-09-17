@@ -1,0 +1,51 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+/**
+ * Creates the table holding one running agent process. A session is what a bearer token
+ * authenticates as, so claims, locks, and presence belong to the process rather than to the
+ * developer who owns it.
+ */
+return new class extends Migration
+{
+    /**
+     * Create the agent sessions table.
+     */
+    public function up(): void
+    {
+        Schema::create('robot_council_agent_sessions', function (Blueprint $table): void {
+            $table->id();
+
+            // Both tables are the package's own, so this constraint is safe to hold
+            $table->foreignId('installation_id')
+                ->constrained('robot_council_installations')
+                ->cascadeOnDelete();
+
+            // Denormalized from the installation so an agent route can check the allowlist
+            // without a join, and kept as a plain column for the reason given in the
+            // installations migration
+            $table->unsignedBigInteger('user_id')->index();
+
+            $table->string('status', 16)->index();
+            $table->timestamp('last_seen_at')->nullable();
+
+            // Which repository or workspace the process is working in, when it says
+            $table->string('project_id')->nullable();
+
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Drop the agent sessions table.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('robot_council_agent_sessions');
+    }
+};

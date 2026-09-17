@@ -1,6 +1,6 @@
 {
     "name": "robot-council/core",
-    "description": "This is my package robot-council",
+    "description": "The core of Robot Council, a coordination service for fleets of AI coding agents",
     "keywords": [
         "laravel",
         "robot-council"
@@ -17,6 +17,7 @@
     "require": {
         "php": "^8.4",
         "illuminate/contracts": "^13.23.0",
+        "laravel/sanctum": "^4.3.1",
         "laravel/socialite": "^5.31.0",
         "spatie/laravel-package-tools": "^1.93.2"
     },

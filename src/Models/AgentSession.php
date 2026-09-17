@@ -1,0 +1,96 @@
+<?php
+
+declare(strict_types=1);
+
+namespace RobotCouncil\Models;
+
+use Illuminate\Auth\Authenticatable;
+use Illuminate\Contracts\Auth\Authenticatable as AuthenticatableContract;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
+use Laravel\Sanctum\HasApiTokens;
+use Laravel\Sanctum\PersonalAccessToken;
+
+/**
+ * One running agent process. It is the principal a session token authenticates as, rather than the
+ * developer who owns it, so claims, locks, and presence belong to the process and a leaked token
+ * cannot act as the human.
+ *
+ * It is authenticatable because Sanctum resolves a token's owner through an authentication
+ * provider, which needs one. It deliberately does not extend `Illuminate\Foundation\Auth\User`,
+ * the framework's base user: a host application whose `auth.providers.users.model` names that class
+ * would then find an agent session to be an instance of its own user model, and Sanctum's
+ * `Guard::hasValidProvider()` -- an `instanceof` against exactly that model -- would admit a session
+ * token on the host's own `auth:sanctum` routes. Sharing no ancestor with the host's user model is
+ * what makes that impossible rather than unlikely.
+ *
+ * It owns no credentials of its own: there is no password column, and nothing signs in as a
+ * session. The password-reset and email-verification behavior the framework's base user carries
+ * would be meaningless here, so it is absent.
+ *
+ * @property int $id
+ * @property int $installation_id
+ * @property int $user_id
+ * @property AgentSessionStatus $status
+ * @property Carbon|null $last_seen_at
+ * @property string|null $project_id
+ * @property-read Installation $installation
+ *
+ * @phpstan-use HasApiTokens<PersonalAccessToken>
+ */
+#[Fillable([
+    'installation_id',
+    'user_id',
+    'status',
+    'last_seen_at',
+    'project_id',
+])]
+#[Table(name: 'robot_council_agent_sessions')]
+final class AgentSession extends Model implements AuthenticatableContract
+{
+    use Authenticatable;
+
+    /** @use HasApiTokens<PersonalAccessToken> */
+    use HasApiTokens;
+
+    /**
+     * The attribute casts.
+     *
+     * Public rather than protected, because Pest's `strict()` preset forbids protected methods in
+     * the package's namespaces, and PHP allows a subclass to widen a parent's visibility.
+     *
+     * @return array<string, string> The casts Eloquent applies to this model's attributes.
+     */
+    public function casts(): array
+    {
+        return [
+            'installation_id' => 'integer',
+            'user_id' => 'integer',
+            'status' => AgentSessionStatus::class,
+            'last_seen_at' => 'datetime',
+        ];
+    }
+
+    /**
+     * The installation that started this session.
+     *
+     * @return BelongsTo<Installation, $this> The owning installation.
+     */
+    public function installation(): BelongsTo
+    {
+        return $this->belongsTo(Installation::class);
+    }
+
+    /**
+     * Determine whether the session has ended.
+     *
+     * @return bool True once the process is gone, which is final.
+     */
+    public function hasGone(): bool
+    {
+        return $this->status === AgentSessionStatus::Gone;
+    }
+}

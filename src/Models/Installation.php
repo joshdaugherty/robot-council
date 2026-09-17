@@ -1,0 +1,117 @@
+<?php
+
+declare(strict_types=1);
+
+namespace RobotCouncil\Models;
+
+use Illuminate\Auth\Authenticatable;
+use Illuminate\Contracts\Auth\Authenticatable as AuthenticatableContract;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
+use Laravel\Sanctum\HasApiTokens;
+use Laravel\Sanctum\PersonalAccessToken;
+use RobotCouncil\Access\Ability;
+
+/**
+ * One harness on one machine, approved once by a developer through the device-code flow. Its
+ * credential can do nothing but start and renew agent sessions, so a leak costs short-lived
+ * session tokens rather than the fleet.
+ *
+ * It is a token owner rather than a user: the developer it belongs to is `user_id`, a key in the
+ * host application's users table, which the package does not own and holds no foreign key to. It is
+ * authenticatable only because Sanctum resolves a token's owner through an authentication provider,
+ * and it shares no ancestor with any host user model, for the reason `AgentSession` records.
+ *
+ * @property int $id
+ * @property int $user_id
+ * @property string $harness
+ * @property string $machine_label
+ * @property list<string> $granted_abilities
+ * @property int|null $approved_by
+ * @property string|null $requested_ip
+ * @property Carbon $expires_at
+ * @property Carbon|null $revoked_at
+ * @property-read Collection<int, AgentSession> $sessions
+ *
+ * @phpstan-use HasApiTokens<PersonalAccessToken>
+ */
+#[Fillable([
+    'user_id',
+    'harness',
+    'machine_label',
+    'granted_abilities',
+    'approved_by',
+    'requested_ip',
+    'expires_at',
+])]
+#[Table(name: 'robot_council_installations')]
+final class Installation extends Model implements AuthenticatableContract
+{
+    use Authenticatable;
+
+    /** @use HasApiTokens<PersonalAccessToken> */
+    use HasApiTokens;
+
+    /**
+     * The attribute casts.
+     *
+     * Public rather than protected, because Pest's `strict()` preset forbids protected methods in
+     * the package's namespaces, and PHP allows a subclass to widen a parent's visibility.
+     *
+     * @return array<string, string> The casts Eloquent applies to this model's attributes.
+     */
+    public function casts(): array
+    {
+        return [
+            'user_id' => 'integer',
+            'granted_abilities' => 'array',
+            'approved_by' => 'integer',
+            'expires_at' => 'datetime',
+            'revoked_at' => 'datetime',
+        ];
+    }
+
+    /**
+     * The agent sessions this installation has started.
+     *
+     * @return HasMany<AgentSession, $this> The sessions, in no particular order.
+     */
+    public function sessions(): HasMany
+    {
+        return $this->hasMany(AgentSession::class);
+    }
+
+    /**
+     * Determine whether the installation may still act.
+     *
+     * Checked on every request rather than trusted from the token, so revoking an installation or
+     * shortening the configured maximum age takes effect on the next request.
+     *
+     * @return bool True while the installation is neither revoked nor past its expiry.
+     */
+    public function isUsable(): bool
+    {
+        return $this->revoked_at === null && $this->expires_at->isFuture();
+    }
+
+    /**
+     * The abilities this installation's session tokens carry.
+     *
+     * @return list<string> The granted abilities, with anything outside the fixed list dropped.
+     */
+    public function abilities(): array
+    {
+        $known = Ability::values(Ability::grantable());
+
+        // Drop anything the fixed list no longer holds, so a renamed or retired ability cannot
+        // survive in a stored row and be checked against a route later
+        return array_values(array_filter(
+            $this->granted_abilities,
+            static fn (string $ability): bool => \in_array($ability, $known, true)
+        ));
+    }
+}

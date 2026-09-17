@@ -13,13 +13,30 @@ return [
     | IDs rather than logins, because a login can be renamed and then claimed
     | by someone else. Admins are developers with the `robot-council-admin`
     | ability as well. Both lists accept a comma-separated string or an array,
-    | and both are read on every request.
+    | and both are read on every request. A host that runs `php artisan config:cache`
+    | bakes them in: re-run that command after changing either list, or the old
+    | list stays live.
     |
     */
 
     'access' => [
         'developers' => env('ROBOT_COUNCIL_DEVELOPERS', ''),
         'admins' => env('ROBOT_COUNCIL_ADMINS', ''),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Authentication
+    |--------------------------------------------------------------------------
+    |
+    | The guard the package signs developers in on, and checks them against. The
+    | host application's default guard is deliberately not assumed, because a
+    | host with several guards may default to another one.
+    |
+    */
+
+    'auth' => [
+        'guard' => env('ROBOT_COUNCIL_GUARD', 'web'),
     ],
 
     /*

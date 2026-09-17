@@ -53,7 +53,8 @@ final class InstallCommand extends Command
 
         $files->put($target, $files->get($this->stubPath()));
 
-        $this->components->info(sprintf('Wrote %s. Run `php artisan migrate`, and commit the migration.', basename($target)));
+        $this->components->info(sprintf('Wrote %s. Review it, commit it, and run `php artisan migrate`.', basename($target)));
+        $this->components->warn('It makes `users.password` and `users.email` nullable, which rewrites those column definitions. Read it before migrating a database that has custom collations, defaults, or triggers on that table.');
 
         return self::SUCCESS;
     }

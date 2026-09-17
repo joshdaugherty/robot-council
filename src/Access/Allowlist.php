@@ -8,7 +8,9 @@ use Illuminate\Contracts\Config\Repository;
 
 /**
  * Decides which GitHub accounts may use the service, from the `robot-council.access` lists. It
- * reads configuration on every call, so removing an ID takes effect on the next request.
+ * reads configuration on every call, so removing an ID takes effect on the next request — unless
+ * the host application caches its configuration, in which case it takes effect when the host
+ * re-runs `php artisan config:cache`.
  */
 final class Allowlist
 {
@@ -69,8 +71,14 @@ final class Allowlist
     {
         $configured = $this->config->get($key, []);
 
+        // Refuse anything else: `ROBOT_COUNCIL_ADMINS=true` becomes boolean true, whose string
+        // form is `1`, which would otherwise admit GitHub user ID 1
+        if (! \is_array($configured) && ! \is_string($configured)) {
+            return [];
+        }
+
         // Split an environment string into entries, and take an array as it stands
-        $entries = \is_array($configured) ? $configured : explode(',', \is_scalar($configured) ? (string) $configured : '');
+        $entries = \is_array($configured) ? $configured : explode(',', $configured);
 
         // Keep only the entries that are whole numbers, since GitHub user IDs are integers
         $ids = [];

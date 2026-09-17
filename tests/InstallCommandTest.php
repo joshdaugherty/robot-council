@@ -66,16 +66,13 @@ it('writes a migration that runs cleanly on a fresh application', function (): v
     $this->loadLaravelMigrations();
     $this->loadMigrationsFrom($databasePath.'/migrations');
 
-    expect(Schema::hasColumns('users', ['github_id', 'github_login', 'avatar_url']))->toBeTrue();
-
     // A GitHub-only developer has no password, and may have no email
-    DB::table('users')->insert([
-        'name' => 'octodev',
-        'github_id' => 4242,
-        'github_login' => 'octodev',
-    ]);
+    DB::table('users')->insert(['name' => 'octodev']);
 
     expect(DB::table('users')->count())->toBe(1);
+
+    // The package adds no columns of its own to the host's table
+    expect(Schema::hasColumn('users', 'github_id'))->toBeFalse();
 });
 
 it('keeps the email address unique after relaxing the column', function (): void {
@@ -93,7 +90,7 @@ it('keeps the email address unique after relaxing the column', function (): void
         ->toThrow(QueryException::class);
 });
 
-it('keeps the GitHub ID unique', function (): void {
+it('leaves a column that already admits null alone', function (): void {
     $databasePath = $this->useTemporaryDatabasePath();
 
     expect(Artisan::call('robot-council:install'))->toBe(0);
@@ -101,8 +98,10 @@ it('keeps the GitHub ID unique', function (): void {
     $this->loadLaravelMigrations();
     $this->loadMigrationsFrom($databasePath.'/migrations');
 
-    DB::table('users')->insert(['name' => 'First', 'github_id' => 4242]);
+    // Running it a second time is a no-op, because both columns are nullable by then
+    $this->loadMigrationsFrom($databasePath.'/migrations');
 
-    expect(fn () => DB::table('users')->insert(['name' => 'Second', 'github_id' => 4242]))
-        ->toThrow(QueryException::class);
+    DB::table('users')->insert(['name' => 'octodev']);
+
+    expect(DB::table('users')->count())->toBe(1);
 });

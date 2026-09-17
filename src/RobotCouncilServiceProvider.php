@@ -44,8 +44,21 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
      */
     public function packageBooted(): void
     {
+        $this->registerMigrations();
         $this->registerRoutes();
         $this->registerAbilities();
+    }
+
+    /**
+     * Load the migrations for the package's own tables.
+     *
+     * They are loaded rather than published, so `php artisan migrate` picks up an upgrade and a
+     * host cannot end up running both a published copy and the package's own. The migration that
+     * changes the host's users table is the opposite case, and `robot-council:install` writes it.
+     */
+    private function registerMigrations(): void
+    {
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
     }
 
     /**

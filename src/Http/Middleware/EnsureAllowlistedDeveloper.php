@@ -8,7 +8,9 @@ use Closure;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use RobotCouncil\Access\Allowlist;
+use RobotCouncil\Access\Guard;
 use RobotCouncil\Support\HostUsers;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
@@ -23,13 +25,15 @@ final class EnsureAllowlistedDeveloper
 {
     /**
      * @param  Allowlist  $allowlist  The configured access lists.
-     * @param  HostUsers  $hostUsers  The host application's user records.
+     * @param  HostUsers  $hostUsers  The developer's host user row and GitHub identity.
      * @param  AuthFactory  $auth  The host application's authentication factory.
+     * @param  Guard  $guard  The configured guard's name.
      */
     public function __construct(
         private readonly Allowlist $allowlist,
         private readonly HostUsers $hostUsers,
-        private readonly AuthFactory $auth
+        private readonly AuthFactory $auth,
+        private readonly Guard $guard
     ) {}
 
     /**
@@ -43,20 +47,28 @@ final class EnsureAllowlistedDeveloper
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $user = $request->user();
+        // Read the developer from the package's configured guard, never the host's default
+        $user = $this->auth->guard($this->guard->name())->user();
 
-        // Send a visitor who is not signed in to GitHub, remembering where they were heading
+        // Send a visitor who is not signed in to GitHub, remembering the path they wanted.
+        // The path alone, never `fullUrl()`, whose host comes from the request's own headers.
         if ($user === null) {
-            return redirect()->guest(route('robot-council.auth.redirect'));
+            $request->session()->put('url.intended', '/'.ltrim($request->path(), '/'));
+
+            return redirect()->to(route('robot-council.auth.redirect'));
         }
 
         $githubId = $this->hostUsers->githubId($user);
 
         // Turn away a developer whose ID configuration no longer lists
         if ($githubId === null || ! $this->allowlist->admits($githubId)) {
+            Log::warning('robot-council refused a signed-in account on neither access list.', [
+                'github_id' => $githubId,
+            ]);
+
             $this->endSession($request);
 
-            throw new AccessDeniedHttpException('This account is not on the robot-council access list.');
+            throw new AccessDeniedHttpException;
         }
 
         return $next($request);
@@ -67,14 +79,14 @@ final class EnsureAllowlistedDeveloper
      *
      * @param  Request  $request  The request whose session is ending.
      *
-     * @throws RuntimeException When the host application's `web` guard cannot sign a user out.
+     * @throws RuntimeException When the configured guard cannot sign a user out.
      */
     private function endSession(Request $request): void
     {
-        $guard = $this->auth->guard('web');
+        $guard = $this->auth->guard($this->guard->name());
 
         if (! $guard instanceof StatefulGuard) {
-            throw new RuntimeException('The `web` guard must be stateful for robot-council to sign a developer out.');
+            throw new RuntimeException(sprintf('The `%s` guard must be stateful for robot-council to sign a developer out.', $this->guard->name()));
         }
 
         $guard->logout();

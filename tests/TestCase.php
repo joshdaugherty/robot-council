@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace RobotCouncil\Tests;
 
 use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Auth\User;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use Laravel\Socialite\SocialiteServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
+use RobotCouncil\Models\GithubIdentity;
 use RobotCouncil\RobotCouncilServiceProvider;
 
 /**
@@ -47,6 +50,9 @@ class TestCase extends Orchestra
      */
     protected function defineEnvironment($app)
     {
+        // The cookie session handler has no request in tests, so sessions live in memory
+        $app['config']->set('session.driver', 'array');
+
         $app['config']->set('services.github', [
             'client_id' => 'github-client-id',
             'client_secret' => 'github-client-secret',
@@ -100,7 +106,8 @@ class TestCase extends Orchestra
     }
 
     /**
-     * Migrate Laravel's own tables, then the package's users columns from the shipped stub.
+     * Migrate Laravel's own tables, the package's own tables, and the users-table change the
+     * install command writes.
      */
     protected function migrateUsersTableWithPackageColumns(): void
     {
@@ -115,6 +122,35 @@ class TestCase extends Orchestra
         );
 
         $this->loadMigrationsFrom($directory);
+
+        // Run the package's own migrations, which its service provider loads
+        Artisan::call('migrate');
+    }
+
+    /**
+     * Enroll a developer: a host user row, and the package's identity for a GitHub account.
+     *
+     * @param  int  $githubId  The developer's numeric GitHub user ID.
+     * @param  string  $login  The GitHub login to record.
+     * @param  string|null  $email  The email for the user row, defaulted from the ID.
+     * @return User The saved user.
+     */
+    protected function enrollDeveloper(int $githubId, string $login = 'octodev', ?string $email = null): User
+    {
+        $user = new User;
+
+        $user->forceFill([
+            'name' => $login,
+            'email' => $email ?? sprintf('octo+%d@example.com', $githubId),
+        ])->save();
+
+        GithubIdentity::query()->create([
+            'user_id' => $user->getKey(),
+            'github_id' => $githubId,
+            'github_login' => $login,
+        ]);
+
+        return $user;
     }
 
     /**

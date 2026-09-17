@@ -41,7 +41,7 @@ const SHARED_CONTEXT = `PACKAGE UNDER TEST: \`joshdaugherty/robot-council\`, a L
 
 TRUST BOUNDARIES — decide WHO controls each input before you rate severity:
 - END USER OF A CONSUMING APPLICATION (anonymous, or authenticated in that app) — reaches package code ONLY through what the package registers: routes and their controllers, middleware, Blade views and components rendered with request or stored data, jobs and listeners fed by user actions, and commands that process user-stored data. Controls request input, headers, uploaded files, and anything they stored that the package later reads back. Highest concern; anonymous outranks authenticated. Judge reachability under the package's SHIPPED DEFAULTS — the package cannot assume the consuming app puts auth or any other middleware in front of what it registers.
-- CONSUMING-APPLICATION DEVELOPER — TRUSTED. Controls config values, published views and migrations (once published, the copy is theirs), container bindings, any middleware the package lets them configure, and the arguments they pass to the package's PHP API and component props. Not an attacker. The package still owns its shipped defaults: a default in \`config/robot-council.php\` that exposes a route without auth or disables a check is a package finding, because consumers run defaults.
+- CONSUMING-APPLICATION DEVELOPER — TRUSTED. Controls config values, published views and migrations (once published, the copy is theirs), container bindings, any middleware the package lets them configure, and the arguments they pass to the package's PHP API and component props. Not an attacker. The package still owns its shipped defaults: a default in a shipped \`config/\` file that exposes a route without auth or disables a check is a package finding, because consumers run defaults.
 - OPERATOR running the package's Artisan commands (console, scheduler, CI) — TRUSTED; arguments and options are operator-controlled. Lower DIRECT concern, but still audit what a command does with data the operator did not supply (rows end users wrote, remote responses, files) for shell/SQL injection, SSRF, path traversal, or unsafe deserialization pivoting through that data; state the trust assumption explicitly rather than ignoring it.
 
 FRAMEWORK FALSE-POSITIVE TRAPS — do NOT report these unless you prove the protection is bypassed:
@@ -164,7 +164,7 @@ const DOMAINS = [
     hotspots: [
       'grep src/ for `Log::`, `logger(`, `report(`, and command output (`->info(`, `->line(`, `->table(`) — request payloads, tokens, or credentials written to logs or the console',
       'models in src/ — `$hidden` on token/secret/password columns; JSON responses, `toArray()`, or API resources that serialize them',
-      'config/robot-council.php — shipped defaults must not contain real credentials; secrets belong in `env(` calls inside config; grep for `env(` outside config/ (it returns null once config is cached, which invites hard-coded fallbacks)',
+      'config/*.php (none yet) — shipped defaults must not contain real credentials; secrets belong in `env(` calls inside config; grep for `env(` outside config/ (it returns null once config is cached, which invites hard-coded fallbacks)',
       'grep for output and debugging calls in src/ that the Pest php() and security() arch presets in tests/ArchTest.php do not list (see vendor/pestphp/pest/src/ArchPresets/); the presets do not cover database/migrations stubs or config/',
       'exception messages and validation errors that echo secrets, config values, or internal paths back to end users',
     ],

@@ -24,29 +24,22 @@
         "driftingly/rector-laravel": "^2.6.2",
         "larastan/larastan": "^3.12.1",
         "laravel/pint": "^1.32.1",
-        "nunomaduro/collision": "^8.9.5",
         "orchestra/testbench": "^11.2.0",
         "pestphp/pest": "^5.2.1",
-        "pestphp/pest-plugin-arch": "^5.0",
-        "pestphp/pest-plugin-laravel": "^5.0.1",
         "pestphp/pest-plugin-phpstan": "^5.2.1",
         "pestphp/pest-plugin-rector": "^5.0.4",
         "phpstan/extension-installer": "^1.4.3",
         "phpstan/phpstan-deprecation-rules": "^2.0.5",
-        "phpstan/phpstan-phpunit": "^2.0.18",
-        "rector/rector": "^2.6.7",
-        "spatie/laravel-ray": "^1.43.9"
+        "rector/rector": "^2.6.7"
     },
     "autoload": {
         "psr-4": {
-            "JoshDaugherty\\RobotCouncil\\": "src/",
-            "JoshDaugherty\\RobotCouncil\\Database\\Factories\\": "database/factories/"
+            "JoshDaugherty\\RobotCouncil\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "JoshDaugherty\\RobotCouncil\\Tests\\": "tests/",
-            "Workbench\\App\\": "workbench/app/"
+            "JoshDaugherty\\RobotCouncil\\Tests\\": "tests/"
         }
     },
     "scripts": {
@@ -70,12 +63,7 @@
         "laravel": {
             "providers": [
                 "JoshDaugherty\\RobotCouncil\\RobotCouncilServiceProvider"
-            ],
-            "aliases": {
-                "RobotCouncil": "JoshDaugherty\\RobotCouncil\\Facades\\RobotCouncil"
-            }
+            ]
         }
-    },
-    "minimum-stability": "dev",
-    "prefer-stable": true
+    }
 }

@@ -97,8 +97,8 @@ their parent without blank lines, and inline code markup for config keys and cla
 The test suite itself is not the usual source. Its outputs land in ignored paths — `build/` (the JUnit report from `phpunit.xml.dist`, PHPStan's `build/phpstan` temp directory), `.phpunit.cache`, `coverage/` — and Testbench's skeleton application lives under `vendor/`. `composer.lock`, `phpunit.xml`, `phpstan.neon`, and `testbench.yaml` are ignored too, so local overrides stay local. What does leak is tooling that rewrites **tracked** files beyond your change:
 
 - **`composer format` / `vendor/bin/pint` with no path** reformats every PHP file that deviates from the preset, not only the ones you touched. `vendor/bin/pint --dirty` limits it to uncommitted files.
-- **`composer refactor` / `vendor/bin/rector`** rewrites every file under `src/`, `config/`, `database/`, and `tests/`, and `rector.php`, that a rule matches, not only the ones you touched. Stage its changes deliberately, or run `composer test:refactor` to see them first.
-- **`vendor/bin/phpstan analyse --generate-baseline`** rewrites the tracked `phpstan-baseline.neon` with every current error, including ones your change did not introduce.
+- **`composer refactor` / `vendor/bin/rector`** rewrites every file under `src/` and `tests/`, and `rector.php`, that a rule matches, not only the ones you touched. Stage its changes deliberately, or run `composer test:refactor` to see them first.
+- **`vendor/bin/phpstan analyse --generate-baseline`** writes a `phpstan-baseline.neon` holding every current error, including ones your change did not introduce. The project has no baseline; fix the errors instead.
 - **`composer require … --no-update`**, the way the CI `tests` job pins a Laravel and Testbench version, edits `composer.json`. Reproducing a CI matrix cell locally leaves that edit behind.
 - **Untracked scratch** — notes, fixtures, and generated files accrete over a branch's life, and nothing in `.gitignore` covers them.
 

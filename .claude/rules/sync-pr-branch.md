@@ -16,7 +16,7 @@ Before a branch is validated and before its pull request is opened, bring it **c
    | --- | --- |
    | `composer.json` | every CI job and every local command, because it decides which Pest, PHPStan, Larastan, Pint, Laravel, and Testbench versions get installed |
    | *no committed `composer.lock`* | every CI job, which resolves dependencies fresh on each run (see below) |
-   | `phpstan.neon.dist`, `phpstan-baseline.neon` | the `phpstan` job, `composer analyse` |
+   | `phpstan.neon.dist` | the `phpstan` job, `composer analyse` |
    | `phpunit.xml.dist` | the `tests` job, `composer test` |
    | `rector.php` | the `rector` job, `composer refactor`, `composer test:refactor` |
    | `tests/Pest.php`, `tests/TestCase.php` | every test: they bind the base test case and register the service provider |
@@ -27,11 +27,11 @@ Before a branch is validated and before its pull request is opened, bring it **c
 
    ```bash
    git log --oneline "$(git merge-base HEAD origin/main)"..origin/main -- \
-     composer.json phpstan.neon.dist phpstan-baseline.neon phpunit.xml.dist \
+     composer.json phpstan.neon.dist phpunit.xml.dist rector.php \
      tests/Pest.php tests/TestCase.php .github/workflows pint.json
    ```
 
-   **Syncing cannot fix the lockfile row.** `composer.lock` is gitignored, so being current with `main` pins the source but not the toolchain. The same commit resolves different Pest, PHPStan, and Laravel versions on different days, even when `main` has not moved. The `run-tests` matrix also resolves each PHP, Laravel, and OS combination twice, once with `prefer-lowest` (the floor of each constraint) and once with `prefer-stable`. A branch that was green last week can go red without a commit anywhere. When that happens, compare what the failing run resolved, shown in its `List Installed Dependencies` step (`composer show -D`, direct dependencies only), with your local `composer show -D`. Do not assume the branch caused it. See [`measurement-parity`](measurement-parity.md).
+   **Syncing cannot fix the lockfile row.** `composer.lock` is gitignored, so being current with `main` pins the source but not the toolchain. The same commit resolves different Pest, PHPStan, and Laravel versions on different days, even when `main` has not moved. The `tests` matrix also resolves each PHP, Laravel, and OS combination twice, once with `prefer-lowest` (the floor of each constraint) and once with `prefer-stable`. A branch that was green last week can go red without a commit anywhere. When that happens, compare what the failing run resolved, shown in its `List Installed Dependencies` step (`composer show -D`, direct dependencies only), with your local `composer show -D`. Do not assume the branch caused it. See [`measurement-parity`](measurement-parity.md).
 
    **Measure this table per repository rather than inheriting it**, and re-measure it when a tool config or a lockfile is committed.
 

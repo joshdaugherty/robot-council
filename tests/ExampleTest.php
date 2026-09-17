@@ -3,19 +3,15 @@
 declare(strict_types=1);
 
 /**
- * Smoke tests for the package's wiring: the service provider boots under Testbench, binds the
- * class behind the facade, and loads the package config.
+ * Smoke test for the package's wiring: the service provider is registered when the package boots
+ * under Testbench.
  *
  * @command  vendor/bin/pest --compact tests/ExampleTest.php
  */
 
-use JoshDaugherty\RobotCouncil\Facades\RobotCouncil as RobotCouncilFacade;
-use JoshDaugherty\RobotCouncil\RobotCouncil;
+use JoshDaugherty\RobotCouncil\RobotCouncilServiceProvider;
 
-it('resolves the package class through the facade', function (): void {
-    expect(RobotCouncilFacade::getFacadeRoot())->toBeInstanceOf(RobotCouncil::class);
-});
-
-it('loads the package config', function (): void {
-    expect(config('robot-council'))->toBeArray();
+it('registers the package service provider', function (): void {
+    expect(app()->getProvider(RobotCouncilServiceProvider::class))
+        ->toBeInstanceOf(RobotCouncilServiceProvider::class);
 });

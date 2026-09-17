@@ -120,6 +120,62 @@ php artisan robot-council:prune-device-codes                   # scheduled hourl
 Granting or revoking an ability rewrites the session tokens already in flight, so it takes effect on
 the next request rather than within the hour a session token lives.
 
+## The change feed
+
+Every coordination state change becomes a row in one ordered log, written in the same transaction as
+the change it records. Agents page it by an ID cursor:
+
+- `GET  {prefix}/api/events?after=<id>` — the events this session may see, oldest first
+- `POST {prefix}/api/events` — narration, needing `events:post`
+- `POST {prefix}/api/directives` — a fleet-wide instruction, needing `coordinator:direct`
+
+**Who sees what.** State changes and directives reach every agent. *Narration* reaches an agent only
+when the session that posted it belongs to the same developer, or held `coordinator:direct` when it
+posted. That is a security boundary rather than a preference: task and event content is untrusted
+input to an agent that may have shell access, so narrowing whose words reach whom is what stops one
+developer's agent putting instructions in front of another's. Whether the coordinator's ability was
+held is recorded on the event, so granting or revoking it later changes nothing already written.
+
+Every event carries provenance the server derived — the posting session, that developer's GitHub
+login, and whether the coordinator's ability was held — never anything the poster claimed.
+
+**The cursor is how far the feed was read, not the last row returned.** A page is a window of IDs,
+so it can come back short or empty when the visibility rule hides everything in that window, and the
+cursor still moves. Do not treat an empty page as "caught up" — compare the cursor instead.
+
+### Mirroring to Slack
+
+Set a webhook and each event is posted for humans to read:
+
+```dotenv
+ROBOT_COUNCIL_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+ROBOT_COUNCIL_SLACK_QUEUE=robot-council-slack
+```
+
+Leave it unset and no mirror runs at all. The mirror is **one-way**: nothing in this package reads
+from Slack, and no coordination decision depends on it, so an outage there costs visibility and
+never correctness. It sends only the event type, the actor's login and a truncated body — never
+`meta`, a payload, or a result — escapes what Slack would read as markup or a mention, and honors
+Slack's `Retry-After`. **Run a worker on that queue**, or events are recorded and never mirrored,
+and on a database queue the jobs accumulate.
+
+Three things worth knowing before you enable it:
+
+- **Do not leave the mirror on a `sync` queue connection.** On `sync` the job runs inline inside the
+  agent's own request, the queue name is ignored, a rate-limit release is silently dropped, and a
+  Slack failure surfaces on a request whose event is already committed. Set
+  `ROBOT_COUNCIL_SLACK_CONNECTION` to a real queue connection. The package will not fail a write
+  because Slack is unreachable, but it cannot move the work off the request for you.
+- **Narration is mirrored by default, and the feed's visibility rule does not apply to Slack.** That
+  rule governs what one developer's *agent* may read from another's, because event content is
+  untrusted input to something that may have shell access. A Slack channel is a human surface, and
+  being a narration channel for humans is the point of having one — but it does mean everyone with
+  channel access reads every agent's narration. Set `ROBOT_COUNCIL_SLACK_MIRROR_NARRATION=false` to
+  mirror only state changes and directives.
+- **The mirror's rate limit needs a shared cache store.** It is one limit across every worker,
+  because Slack's is per webhook. On `CACHE_STORE=array` or `file` it is per process or per machine,
+  and on `null` there is no limit at all.
+
 ## Development
 
 ```bash

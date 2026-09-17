@@ -95,6 +95,40 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Slack
+    |--------------------------------------------------------------------------
+    |
+    | Where the fleet's events are mirrored for humans to read. Leave the webhook
+    | URL unset and no mirror runs at all. Slack is one-way: nothing in this
+    | package reads from it, and no coordination decision depends on it, so an
+    | outage there costs visibility and never correctness.
+    |
+    | The mirror runs on its own queue, away from anything a request waits on.
+    |
+    */
+
+    'slack' => [
+        'webhook_url' => env('ROBOT_COUNCIL_SLACK_WEBHOOK_URL'),
+        'queue' => env('ROBOT_COUNCIL_SLACK_QUEUE', 'robot-council-slack'),
+
+        // The queue connection the mirror runs on. Leave it null to use the application's
+        // default, but note what `sync` means here: the job runs inline inside the agent's own
+        // request, `queue` above is ignored, a rate-limit release is silently dropped, and a
+        // Slack failure surfaces on a request whose event is already committed. The mirror is
+        // meant to cost visibility and never correctness, which only holds off `sync`.
+        'connection' => env('ROBOT_COUNCIL_SLACK_CONNECTION'),
+
+        // Whether narration is mirrored. Narration is the one kind of event the feed restricts by
+        // reader (#29), and that rule is about what one developer's AGENT may read from another's
+        // -- because event content is untrusted input to something that may have shell access.
+        // A Slack channel is a human surface, so mirroring narration there is the point of having
+        // one, and it does mean everyone with channel access reads every agent's narration. Turn
+        // this off to mirror only state changes and directives.
+        'mirror_restricted' => env('ROBOT_COUNCIL_SLACK_MIRROR_NARRATION', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Schedule
     |--------------------------------------------------------------------------
     |
@@ -125,6 +159,10 @@ return [
         'device_token_per_ip' => (int) env('ROBOT_COUNCIL_RATE_DEVICE_TOKEN_PER_IP', 120),
         'verification_per_user' => (int) env('ROBOT_COUNCIL_RATE_VERIFICATION_PER_USER', 20),
         'sessions_per_installation' => (int) env('ROBOT_COUNCIL_RATE_SESSIONS_PER_INSTALLATION', 60),
+        'agent_per_session' => (int) env('ROBOT_COUNCIL_RATE_AGENT_PER_SESSION', 120),
+
+        // Slack's own guidance is about one message a second per webhook
+        'slack_per_minute' => (int) env('ROBOT_COUNCIL_RATE_SLACK_PER_MINUTE', 60),
     ],
 
 ];

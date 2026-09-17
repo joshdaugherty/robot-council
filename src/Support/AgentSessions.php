@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use RobotCouncil\Access\Tokens;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\AgentSessionStatus;
+use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Models\Installation;
 
 /**
@@ -26,8 +27,12 @@ final class AgentSessions
 
     /**
      * @param  Credentials  $credentials  The configured lifetimes.
+     * @param  FleetEvents  $events  The change feed.
      */
-    public function __construct(private readonly Credentials $credentials) {}
+    public function __construct(
+        private readonly Credentials $credentials,
+        private readonly FleetEvents $events
+    ) {}
 
     /**
      * Start a session for one agent process, and issue its first token.
@@ -53,6 +58,15 @@ final class AgentSessions
                 'last_seen_at' => Carbon::now(),
                 'project_id' => $projectId,
             ]);
+
+            // In the same transaction as the session it describes, so a failure here leaves
+            // neither the session nor a feed entry claiming one exists
+            $this->events->record(
+                FleetEventType::SessionEnrolled,
+                $session,
+                sprintf('%s on %s started a session.', $current->harness, $current->machine_label),
+                ['installation_id' => $current->id, 'project_id' => $projectId]
+            );
 
             return new IssuedCredential($session, $this->issueToken($session, $abilities), $abilities);
         });

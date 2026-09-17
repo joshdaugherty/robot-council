@@ -102,6 +102,40 @@ function dateValue(mixed $value): CarbonInterface
 }
 
 /**
+ * Narrow a whole number a test read out of JSON, which arrives untyped.
+ *
+ * @param  mixed  $value  The value to narrow.
+ * @return int The value, as an integer.
+ *
+ * @throws RuntimeException When the value is not an integer.
+ */
+function intValue(mixed $value): int
+{
+    if (! is_int($value)) {
+        throw new RuntimeException(sprintf('Expected an integer, got %s.', get_debug_type($value)));
+    }
+
+    return $value;
+}
+
+/**
+ * Narrow a value a test read out of JSON that should be a list or a map.
+ *
+ * @param  mixed  $value  The value to narrow.
+ * @return array<int|string, mixed> The value, as an array.
+ *
+ * @throws RuntimeException When the value is not an array.
+ */
+function arrayValue(mixed $value): array
+{
+    if (! is_array($value)) {
+        throw new RuntimeException(sprintf('Expected an array, got %s.', get_debug_type($value)));
+    }
+
+    return $value;
+}
+
+/**
  * Narrow a host user key a test read off a model, which `getKey()` returns untyped.
  *
  * Deliberately not `RobotCouncil\Support\HostKey`, which is the production narrowing: a test that

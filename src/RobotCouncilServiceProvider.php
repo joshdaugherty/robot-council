@@ -65,6 +65,16 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
     public const string SESSIONS_LIMITER = 'robot-council-sessions';
 
     /**
+     * The named rate limit on the agent routes, keyed on the session making the request.
+     */
+    public const string AGENT_LIMITER = 'robot-council-agent';
+
+    /**
+     * The named rate limit the Slack mirror job runs through, shared by every worker.
+     */
+    public const string SLACK_LIMITER = 'robot-council-slack';
+
+    /**
      * Declare the package's name and the resources it registers.
      *
      * @param  Package  $package  The package definition to configure.
@@ -289,6 +299,24 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
             return Limit::perMinute($credentials->rateLimit('verification_per_user', 20))
                 ->by('user:'.(\is_scalar($key) ? (string) $key : 'ip:'.$request->ip()));
         });
+
+        RateLimiter::for(self::AGENT_LIMITER, static function (Request $request) use ($credentials): Limit {
+            // Resolved through the guard for the reason the sessions limiter records: the router
+            // sorts `ThrottleRequests` ahead of any middleware outside its priority list
+            $session = $request->user(ApiGuards::AGENT);
+
+            $subject = $session instanceof AgentSession
+                ? (string) $session->id
+                : 'ip:'.$request->ip();
+
+            return Limit::perMinute($credentials->rateLimit('agent_per_session', 120))
+                ->by('agent:'.$subject);
+        });
+
+        // One limit across every worker, because Slack's is per webhook rather than per process
+        RateLimiter::for(self::SLACK_LIMITER, static fn (): Limit => Limit::perMinute(
+            $credentials->rateLimit('slack_per_minute', 60)
+        ));
 
         RateLimiter::for(self::SESSIONS_LIMITER, static function (Request $request) use ($credentials): Limit {
             // Resolved through the guard rather than read from what `EnsureInstallation` leaves on

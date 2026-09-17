@@ -31,6 +31,9 @@ use function Orchestra\Testbench\default_migration_path;
  * Base test case: boots a Testbench application with the package's service provider registered,
  * and provides the fixtures the suite shares — a users table carrying the package's columns,
  * throwaway directories, the access lists, and enrolled installations and agent sessions.
+ *
+ * The fixture helpers are public rather than protected. Pest exposes shared test helpers as global
+ * functions, which are not bound to the test case and cannot reach a protected method.
  */
 class TestCase extends Orchestra
 {
@@ -163,7 +166,7 @@ class TestCase extends Orchestra
      *
      * @return string The directory holding the copy of the install stub that ran.
      */
-    protected function migrateUsersTableWithPackageColumns(): string
+    public function migrateUsersTableWithPackageColumns(): string
     {
         // Run the stub itself, so the suite exercises what `robot-council:install` writes
         $directory = $this->temporaryDirectory('migrations');
@@ -186,7 +189,7 @@ class TestCase extends Orchestra
      * @param  string|null  $email  The email for the user row, defaulted from the ID.
      * @return User The saved user.
      */
-    protected function enrollDeveloper(int $githubId, string $login = 'octodev', ?string $email = null): User
+    public function enrollDeveloper(int $githubId, string $login = 'octodev', ?string $email = null): User
     {
         $user = new User;
 
@@ -210,7 +213,7 @@ class TestCase extends Orchestra
      * @param  list<int>  $developers  GitHub user IDs allowed to sign in.
      * @param  list<int>  $admins  GitHub user IDs that also hold admin rights.
      */
-    protected function setAccessLists(array $developers = [], array $admins = []): void
+    public function setAccessLists(array $developers = [], array $admins = []): void
     {
         config()->set('robot-council.access.developers', implode(',', $developers));
         config()->set('robot-council.access.admins', implode(',', $admins));
@@ -224,7 +227,7 @@ class TestCase extends Orchestra
      * @param  string  $machineLabel  The label the requester claimed.
      * @return Installation The saved installation.
      */
-    protected function approveInstallation(User $user, array $abilities = [], string $machineLabel = 'workbench'): Installation
+    public function approveInstallation(User $user, array $abilities = [], string $machineLabel = 'workbench'): Installation
     {
         $abilities = $abilities === [] ? [Ability::TasksCreate->value, Ability::EventsPost->value] : $abilities;
 
@@ -245,7 +248,7 @@ class TestCase extends Orchestra
      * @param  Installation  $installation  The installation to credential.
      * @return string The plaintext credential.
      */
-    protected function installationCredential(Installation $installation): string
+    public function installationCredential(Installation $installation): string
     {
         return $installation->createToken(
             Installations::CREDENTIAL_NAME,
@@ -260,7 +263,7 @@ class TestCase extends Orchestra
      * @param  Installation  $installation  The installation to start it under.
      * @return array{AgentSession, string} The session and its plaintext token.
      */
-    protected function startAgentSession(Installation $installation): array
+    public function startAgentSession(Installation $installation): array
     {
         $issued = $this->service(AgentSessions::class)->start($installation, null);
 
@@ -291,9 +294,6 @@ class TestCase extends Orchestra
      * credential would arrive as this one's. A real request boots its own application, and Octane
      * flushes the same state between requests.
      *
-     * Public rather than protected, because the helpers Pest exposes as global functions are not
-     * bound to the test case and cannot reach a protected method.
-     *
      * @param  string  $token  The plaintext bearer token.
      * @return $this The test case, with the machine's headers set.
      */
@@ -321,7 +321,7 @@ class TestCase extends Orchestra
      *
      * @throws RuntimeException When the application has not booted.
      */
-    protected function container(): Application
+    public function container(): Application
     {
         $app = $this->app;
 
@@ -342,7 +342,7 @@ class TestCase extends Orchestra
      *
      * @throws RuntimeException When the application has not booted.
      */
-    protected function service(string $abstract): object
+    public function service(string $abstract): object
     {
         $service = $this->container()->make($abstract);
 

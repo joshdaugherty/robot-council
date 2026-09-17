@@ -57,6 +57,10 @@ it('can test', function () {
 - Coverage: `composer test-coverage` (needs a coverage driver; see the
   [`pcov-setup`](../pcov-setup/SKILL.md) skill).
 - CI's `tests` job in `.github/workflows/ci.yml` runs `vendor/bin/pest --ci` across its OS / PHP / Laravel matrix.
+- Tests are code under the same gates as `src/`: PHPStan analyzes `tests/` at level `max` (with
+  `pestphp/pest-plugin-phpstan`, which types `expect()` chains and flags redundant expectations such
+  as `expect(true)->toBeTrue()`), and Rector processes it. Run `composer analyse` and
+  `composer test:refactor` after writing or changing a test.
 
 `phpunit.xml.dist` sets `executionOrder="random"`, `failOnRisky`, `failOnWarning`, and
 `beStrictAboutOutputDuringTests`, so an order-dependent test flakes and a test that prints output

@@ -6,6 +6,7 @@ composer.lock
 .phpunit.cache
 .phpunit.result.cache
 /build
+__pycache__/
 
 # IDE Helper
 _ide_helper.php

@@ -167,7 +167,7 @@ use const PHP_EOL;
 
 use Illuminate\Contracts\Filesystem\Cloud;
 use Illuminate\Support\Str;
-use JoshDaugherty\RobotCouncil\Facades\RobotCouncil;
+use JoshDaugherty\RobotCouncil\RobotCouncilServiceProvider;
 
 use function Laravel\Prompts\confirm;
 ```
@@ -280,7 +280,7 @@ after their single responsibility.
 - Centralize repeated logic, validation rules, configuration, and business rules.
 - Use abstractions (functions, classes) — but balance against the AHA principle: three similar
   lines are better than a premature abstraction.
-- Keep a single source of truth for constants and config (`config/robot-council.php`).
+- Keep a single source of truth for constants and config (a file under `config/`, once the package ships one).
 
 ## 13. `unset()` and `gc_collect_cycles()` — only where memory pressure is real
 
@@ -306,11 +306,11 @@ unset(
 
 ## 14. Architecture presets (`tests/ArchTest.php`)
 
-Pest's `php()`, `security()`, and `strict()` presets run over the package's namespaces (`src/`,
-`database/factories/`), not `tests/`, and fail the suite on:
+Pest's `php()`, `security()`, and `strict()` presets run over the package's autoloaded namespace
+(`src/`), not `tests/`, and fail the suite on:
 
 - **Classes** — every class `final`, no `abstract` classes, and no `protected` methods. When a
-  parent declares a method `protected` that you must override (the facade's
+  parent declares a method `protected` that you must override (for example a facade's
   `getFacadeAccessor()`), widen it to `public`, which PHP allows, and add the file to the
   `MakeInheritedMethodVisibilitySameAsParentRector` skip in `rector.php`, which would otherwise
   narrow it back. `final` means consumers cannot extend a class, so an extension point has to be

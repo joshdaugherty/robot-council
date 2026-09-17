@@ -12,8 +12,8 @@ metadata:
 
 Read the installed version rather than recalling another one: `composer show pestphp/pest`
 (5.2.1 when this was written; `composer.lock` is not committed, so a fresh install can resolve
-differently) and its source under `vendor/pestphp/pest/src`, `vendor/pestphp/pest-plugin-laravel/src`,
-and `vendor/pestphp/pest-plugin-arch/src`. For prose documentation use
+differently) and its source under `vendor/pestphp/pest/src` and
+`vendor/pestphp/pest-plugin-arch/src`. For prose documentation use
 [pestphp.com/docs](https://pestphp.com/docs) and, for the package test harness,
 [Orchestra Testbench](https://packages.tools/testbench).
 
@@ -89,7 +89,10 @@ The HTTP forms apply once the package registers routes; there are none yet.
 
 ## Mocking
 
-Import the mock function before use: `use function Pest\Laravel\mock;`
+Mock through the test case: `$this->mock(Service::class, function (MockInterface $mock): void { ... })`
+(Laravel's `InteractsWithContainer`, which Testbench's `TestCase` uses), or `Facade::shouldReceive()`
+for a facade. `pestphp/pest-plugin-laravel` is not installed, so there is no `Pest\Laravel\mock()`
+function to import.
 
 ### A mocked facade is still installed during `afterEach` — never clean up through one
 
@@ -162,7 +165,7 @@ Browser, smoke, and visual-regression testing need Pest plugins that are not ins
 
 ## Common Pitfalls
 
-- Not importing `use function Pest\Laravel\mock;` before using `mock()`
+- Calling `Pest\Laravel\mock()` or another `Pest\Laravel` function: the plugin is not installed; use `$this->mock()`
 - Using `assertStatus(200)` or `assertExitCode(0)` instead of `assertSuccessful()`
 - Forgetting datasets for repetitive validation tests
 - Deleting tests without approval

@@ -1,75 +1,32 @@
-# This is my package robot-council
+# robot-council
 
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/joshdaugherty/robot-council.svg?style=flat-square)](https://packagist.org/packages/joshdaugherty/robot-council)
 [![CI](https://github.com/joshdaugherty/robot-council/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/joshdaugherty/robot-council/actions/workflows/ci.yml?query=branch%3Amain)
-[![Total Downloads](https://img.shields.io/packagist/dt/joshdaugherty/robot-council.svg?style=flat-square)](https://packagist.org/packages/joshdaugherty/robot-council)
 
-This is where your description should go. Limit it to a paragraph or two. Consider adding a small example.
+A Laravel package in early development. It registers a service provider and has no features yet.
+
+## Requirements
+
+- PHP 8.4 or later
+- Laravel 13.23 or later
 
 ## Installation
 
-You can install the package via composer:
+The package is not published on Packagist yet.
+
+## Development
 
 ```bash
-composer require joshdaugherty/robot-council
-```
-
-You can publish and run the migrations with:
-
-```bash
-php artisan vendor:publish --tag="robot-council-migrations"
-php artisan migrate
-```
-
-You can publish the config file with:
-
-```bash
-php artisan vendor:publish --tag="robot-council-config"
-```
-
-This is the contents of the published config file:
-
-```php
-return [
-];
-```
-
-Optionally, you can publish the views using
-
-```bash
-php artisan vendor:publish --tag="robot-council-views"
-```
-
-## Usage
-
-```php
-$robotCouncil = new JoshDaugherty\RobotCouncil();
-echo $robotCouncil->echoPhrase('Hello, JoshDaugherty!');
-```
-
-## Testing
-
-```bash
-composer test
+composer install
+composer test            # Pest
+composer analyse         # PHPStan (level max)
+vendor/bin/pint --test   # code style
+composer test:refactor   # Rector (dry run)
 ```
 
 ## Changelog
 
-Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed recently.
-
-## Contributing
-
-Please see [CONTRIBUTING](CONTRIBUTING.md) for details.
-
-## Security Vulnerabilities
-
-Please review [our security policy](../../security/policy) on how to report security vulnerabilities.
-
-## Credits
-
-- [joshdaugherty](https://github.com/joshdaugherty)
-- [All Contributors](../../contributors)
+See [CHANGELOG](CHANGELOG.md).
 
 ## License
 
-The MIT License (MIT). Please see [License File](LICENSE.md) for more information.
+The MIT License (MIT). See [License File](LICENSE.md).

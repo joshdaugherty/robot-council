@@ -24,6 +24,9 @@ _ide_helper_models.php
 /.fleet
 /.vscode
 
+# Claude Code
+/.claude/worktrees/
+
 # Misc
 phpunit.xml
 phpstan.neon

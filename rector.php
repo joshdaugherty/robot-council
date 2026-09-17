@@ -18,6 +18,8 @@ return RectorConfig::configure()
         __DIR__.'/src',
         __DIR__.'/config',
         __DIR__.'/database',
+        __DIR__.'/tests',
+        __FILE__,
     ])
     // Keep the cache inside this tree (`build/` is gitignored). Rector's default is a directory
     // under the system temp directory shared by every checkout on the machine, so two worktrees

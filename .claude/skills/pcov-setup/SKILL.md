@@ -180,12 +180,12 @@ an `extension=` line in Herd's Windows `php.ini`. Verify with
   ```bash
   env -i PATH="$HOME/.config/herd/bin/php84" SystemRoot='C:\WINDOWS' \
     TEMP="$TEMP" TMP="$TMP" \
-    php vendor/bin/pest --mutate --path=src --class="JoshDaugherty\RobotCouncil\<Class>"
+    php vendor/bin/pest --mutate --path=src --class="RobotCouncil\<Class>"
   ```
 
 ## Running mutation and coverage once a driver is present
 
-- **Mutation run:** `vendor/bin/pest --mutate --path=src --class="JoshDaugherty\RobotCouncil\<Class>"`.
+- **Mutation run:** `vendor/bin/pest --mutate --path=src --class="RobotCouncil\<Class>"`.
   There is no `composer mutate` script. The traps below were read from
   `pestphp/pest-plugin-mutate` v5.0.2; `composer.lock` is not committed, so confirm the installed
   version with `composer show pestphp/pest-plugin-mutate`.
@@ -203,7 +203,7 @@ an `extension=` line in Herd's Windows `php.ini`. Verify with
   scope to a relative sub-path and a test file:
 
   ```bash
-  vendor/bin/pest tests/<File>Test.php --mutate --path=src/<Subdir> --class="JoshDaugherty\RobotCouncil\<Class>" --covered-only
+  vendor/bin/pest tests/<File>Test.php --mutate --path=src/<Subdir> --class="RobotCouncil\<Class>" --covered-only
   ```
 
 - **`0 Mutations for 0 Files created` means it found nothing to mutate — a setup failure, NOT a

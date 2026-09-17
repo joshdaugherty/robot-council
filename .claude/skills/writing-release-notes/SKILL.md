@@ -1,7 +1,7 @@
 ---
 name: writing-release-notes
 description: >-
-  GitHub Release conventions for the `joshdaugherty/robot-council` Composer package: the
+  GitHub Release conventions for the `robot-council/core` Composer package: the
   em-dash release title (`vX.Y.Z — Theme`), a one-sentence milestone lead with an optional
   `**Breaking change**` callout, and a CLOSED, ordered heading vocabulary
   (`## Breaking changes`, `## What's new`, `## What's fixed`, `## Security`,
@@ -17,14 +17,14 @@ description: >-
 
 # Writing Release Notes
 
-House style for GitHub Releases in `joshdaugherty/robot-council`. It applies to the **whole release
+House style for GitHub Releases in `robot-council/core`. It applies to the **whole release
 range** — retroactive tags and new ones alike — so the releases page and `CHANGELOG.md` read as one
 consistent changelog. The audience is someone deciding whether to take this version of the package;
 lead with the theme, then bucket the changes.
 
 ## Versioning — what the number promises
 
-This repo is a **Composer library**: applications require `joshdaugherty/robot-council` and Composer
+This repo is a **Composer library**: applications require `robot-council/core` and Composer
 resolves the constraint against its **git tags**. The tag is therefore a compatibility promise, not a
 milestone marker. Use **semantic versioning**: `MAJOR.MINOR.PATCH`, where a patch never breaks a
 consumer, a minor adds without breaking, and a major is the breaking boundary.
@@ -73,15 +73,15 @@ Do **not** invent headings outside this closed set. If something doesn't obvious
 
 ## Line format
 
-- One bullet per change: `- <PR title> [#N](https://github.com/joshdaugherty/robot-council/pull/N)`.
+- One bullet per change: `- <PR title> [#N](https://github.com/robot-council/core/pull/N)`.
 - **Use the PR title from the GitHub API** (`gh pr view N --json title`), **never the commit
   subject on `main`.** A merge commit's subject is a branch slug (`Merge pull request #N from
-  joshdaugherty/<branch>`), and this repo's squash setting (`COMMIT_OR_PR_TITLE`) takes the
+  robot-council/<branch>`), and this repo's squash setting (`COMMIT_OR_PR_TITLE`) takes the
   *commit's* title when a PR has a single commit, so neither is reliably the PR title. For a change
   on `main` with no PR number in its subject — a direct commit, or each commit of a rebase merge —
   use the commit subject (strip any Conventional-Commit prefix and `[skip ci]` litter) and link the
   **short commit SHA**:
-  `` - <title> [`a1b2c3d`](https://github.com/joshdaugherty/robot-council/commit/<sha>) ``.
+  `` - <title> [`a1b2c3d`](https://github.com/robot-council/core/commit/<sha>) ``.
   Every bullet is linked — `[#N]` for a PR, a backticked short SHA for a direct commit.
 - **No `by @author`.** On a single-maintainer repository attribution is noise. GitHub's
   auto-generated notes add it, which is one reason not to use them.
@@ -141,7 +141,7 @@ so it doesn't also auto-list in a bucket).
 python3 .claude/skills/writing-release-notes/gen_release_notes.py <prev-tag> origin/main \
     --lead "One-sentence milestone theme." \
     --breaking "republish the config file and rename \`seats\` to \`members\`." \
-    --breaking-item "Rename the \`seats\` config key to \`members\` [#12](https://github.com/joshdaugherty/robot-council/pull/12)." \
+    --breaking-item "Rename the \`seats\` config key to \`members\` [#12](https://github.com/robot-council/core/pull/12)." \
     --exclude 12 \
     > body.md
 ```

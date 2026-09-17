@@ -1,7 +1,7 @@
 ---
 name: writing-pull-requests
 description: >-
-  Pull-request title and body conventions for `joshdaugherty/robot-council`. The title is
+  Pull-request title and body conventions for `robot-council/core`. The title is
   imperative verb-first, has no Conventional-Commit prefix and no internal-process references
   (batch or merge-order hints), with correct acronym casing and inline-code handles — it renders
   verbatim into GitHub Release notes. The body: a one-paragraph lede opening with `Closes #N.`,
@@ -19,7 +19,7 @@ description: >-
 
 # Writing Pull Requests
 
-This skill captures the house style for PR descriptions in `joshdaugherty/robot-council`. The
+This skill captures the house style for PR descriptions in `robot-council/core`. The
 audience is another engineer reviewing the change — explain the *why* before the *what*,
 prefer specifics over generalities, and bound scope explicitly. There is no PR template in
 `.github/`; this skill is the skeleton.
@@ -64,7 +64,7 @@ holds for `gh pr edit <n> --body-file`.
 **Every PR carries an assignee, and it is the developer responsible for landing it.** Not a reviewer, and not a nicety — it is the only place a reader can see who owns a branch that is open and quiet.
 
 ```bash
-gh api -X POST repos/joshdaugherty/robot-council/issues/<pr-number> -f 'assignees[]=<login>'
+gh api -X POST repos/robot-council/core/issues/<pr-number> -f 'assignees[]=<login>'
 ```
 
 The PR number works on the `issues` endpoint — GitHub treats pull requests as issues for labels, assignees and comments. **That endpoint replaces the assignee list; the sibling `…/issues/{n}/assignees` adds to it.** The two diverge only when a request omits somebody already assigned, so a hand-over written against the wrong one silently produces two assignees — the mechanics are in [`github-api-budget`](../../rules/github-api-budget.md).
@@ -111,11 +111,11 @@ inventory, in order of appearance:
 - **`## The bug`** — fix PRs only; explains the root cause before the fix.
 - **`## Approach`** — used when a resolution path was chosen over alternatives, or when
   reviewers need to see the design rationale. Link the issue-comment URL where the decision was
-  made (`[#N (comment)](https://github.com/joshdaugherty/robot-council/issues/N#issuecomment-…)`).
+  made (`[#N (comment)](https://github.com/robot-council/core/issues/N#issuecomment-…)`).
 - **`## Commits`** — used when the PR's structure maps cleanly to its commit list. One line per
   commit: `` - `<short-sha>` <conventional-commit-subject> ``.
 - **`## Files`** / **`## Files changed`** — itemized list of files with a one-line reason each:
-  `` - **edit** [`src/RobotCouncil.php`](https://github.com/joshdaugherty/robot-council/blob/<branch>/src/RobotCouncil.php) — <reason>. ``
+  `` - **edit** [`src/RobotCouncil.php`](https://github.com/robot-council/core/blob/<branch>/src/RobotCouncil.php) — <reason>. ``
   (or `**add**`, `**delete**`, `**move**`). Pre-line a one-shot
   `git diff main..HEAD --stat → N files changed, X insertions(+), Y deletions(-).` summary
   when useful.
@@ -223,7 +223,7 @@ read the field with `gh pr view <N> --json closingIssuesReferences`, then list e
 keyword-reference pair in the plain text, same-line and cross-line alike:
 
 ```bash
-{ git log --format=%B origin/main..HEAD; gh api repos/joshdaugherty/robot-council/pulls/<N> --jq '.title, .body'; } |
+{ git log --format=%B origin/main..HEAD; gh api repos/robot-council/core/pulls/<N> --jq '.title, .body'; } |
   perl -0777 -ne '$n += length; while (/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:[\w.-]+\/[\w.-]+#\d+|#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+)/gi) { ($m = $&) =~ s/\s+/ /g; print "$m\n"; $h++ } END { printf "scanned %d bytes, %d keyword-reference pairs\n", $n, $h }'
 ```
 
@@ -249,12 +249,12 @@ not a clean result.
 Backtick anything a developer would type, paste, or grep for:
 
 - File paths — almost always linked, and the URL is the **absolute branch URL**, never a
-  relative path: `` [`src/RobotCouncil.php`](https://github.com/joshdaugherty/robot-council/blob/<branch>/src/RobotCouncil.php) ``.
+  relative path: `` [`src/RobotCouncil.php`](https://github.com/robot-council/core/blob/<branch>/src/RobotCouncil.php) ``.
   Use `/blob/<branch>/…` for files (`/tree/<branch>/…` for directories), with `<branch>` set to
   the PR's head branch — **even for files already on `main`**. The displayed text stays the bare
   backticked path; only the target is absolute. Vendor file refs include line numbers, e.g.
   `…/PackageServiceProvider.php#L20-L35`.
-- Class names, method names, function names — `JoshDaugherty\RobotCouncil\RobotCouncilServiceProvider`,
+- Class names, method names, function names — `RobotCouncil\RobotCouncilServiceProvider`,
   `Package::hasConfigFile()`, `configurePackage`.
 - Package handles — `spatie/laravel-package-tools`, `orchestra/testbench`, `illuminate/contracts`.
 - Version numbers in dependency bumps — `` `13.31.0` → `13.32.0` `` (backticked, joined by a
@@ -323,8 +323,8 @@ public function members(): array
 
 ## Files
 
-- **edit** [`src/RobotCouncil.php`](https://github.com/joshdaugherty/robot-council/blob/fix-members-default/src/RobotCouncil.php) — default the lookup to `[]`.
-- **add** [`tests/RobotCouncilMembersTest.php`](https://github.com/joshdaugherty/robot-council/blob/fix-members-default/tests/RobotCouncilMembersTest.php) — absent-key and configured-list cases.
+- **edit** [`src/RobotCouncil.php`](https://github.com/robot-council/core/blob/fix-members-default/src/RobotCouncil.php) — default the lookup to `[]`.
+- **add** [`tests/RobotCouncilMembersTest.php`](https://github.com/robot-council/core/blob/fix-members-default/tests/RobotCouncilMembersTest.php) — absent-key and configured-list cases.
 
 ## Test plan
 

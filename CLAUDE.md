@@ -1,10 +1,10 @@
 # robot-council
 
-A **Laravel package** (`joshdaugherty/robot-council`), not an application. It was scaffolded from `spatie/package-skeleton-laravel` and has no features yet: `src/` holds only the service provider.
+A **Laravel package** (`robot-council/core`), not an application. It was scaffolded from `spatie/package-skeleton-laravel` and has no features yet: `src/` holds only the service provider.
 
 ## Layout
 
-- `src/` — namespace `JoshDaugherty\RobotCouncil\`. `RobotCouncilServiceProvider` is built on `spatie/laravel-package-tools` and is auto-discovered by consuming apps through `extra.laravel` in `composer.json`. It registers only the package name so far: no config, migrations, views, commands, or facade.
+- `src/` — namespace `RobotCouncil\`. `RobotCouncilServiceProvider` is built on `spatie/laravel-package-tools` and is auto-discovered by consuming apps through `extra.laravel` in `composer.json`. It registers only the package name so far: no config, migrations, views, commands, or facade.
 - `tests/` — Pest on Orchestra Testbench. `tests/Pest.php` binds `tests/TestCase.php`, which registers the service provider; `tests/ArchTest.php` applies Pest's `php()`, `security()`, and `strict()` arch presets to the package's namespaces.
 - `.claude/rules/` loads into every session; `.claude/skills/` loads on demand.
 
@@ -15,7 +15,7 @@ A **Laravel package** (`joshdaugherty/robot-council`), not an application. It wa
 | Install | `composer install` |
 | Tests | `composer test` (`vendor/bin/pest`); one file or test: `vendor/bin/pest --compact tests/ExampleTest.php --filter=...` |
 | Coverage | `composer test-coverage` (needs PCOV or Xdebug; see the `pcov-setup` skill) |
-| Mutation | `vendor/bin/pest --mutate --path=src --class="JoshDaugherty\RobotCouncil\<Class>"` |
+| Mutation | `vendor/bin/pest --mutate --path=src --class="RobotCouncil\<Class>"` |
 | Static analysis | `composer analyse` (PHPStan with Larastan and `pestphp/pest-plugin-phpstan`, level `max` with bleeding edge, no baseline); PHPStan and Rector both cover `src`, `tests`, and `rector.php` |
 | Format | `vendor/bin/pint --dirty`; check only: `vendor/bin/pint --test` |
 | Refactor | `composer refactor` (Rector; see `rector.php`); check only: `composer test:refactor` |
@@ -33,9 +33,9 @@ A **Laravel package** (`joshdaugherty/robot-council`), not an application. It wa
   - `ci-passed` succeeds only when every other job succeeded. It is the one check the `main` ruleset requires.
   - Nothing writes `CHANGELOG.md` automatically. A release adds its entry through an `Update CHANGELOG for vX.Y.Z` pull request before the tag (the `writing-release-notes` skill).
   - Dependabot opens weekly Composer and GitHub Actions update pull requests labeled `dependencies`. Nothing merges them automatically: take each through `pre-merge-check` like any other change.
-- **`main` is guarded by a ruleset**: a pull request, a successful `ci-passed`, and a branch that is up to date with `main`. Enforcement holds only while the ruleset is `active` (`gh api repos/joshdaugherty/robot-council/rulesets`); `pre-merge-check` covers what no check can.
+- **`main` is guarded by a ruleset**: a pull request, a successful `ci-passed`, and a branch that is up to date with `main`. Enforcement holds only while the ruleset is `active` (`gh api repos/robot-council/core/rulesets`); `pre-merge-check` covers what no check can.
 - **Package classes are `final`, with no `protected` methods.** Pest's `strict()` preset enforces it, so consumers cannot extend them; extension points have to be designed in. A method a parent declares `protected` is widened to `public`, with a per-file Rector skip (see `php-coding-standards`).
-- **The repository is owned by a personal account**, so GitHub issue types are unavailable. The issue templates declare them for the day it moves to an organization.
+- **The repository belongs to the `robot-council` GitHub organization**, which enables the `Task`, `Bug`, and `Feature` issue types. It moved from `joshdaugherty/robot-council` on 2026-09-17, and old URLs redirect, so links in earlier issues, pull requests, and the `v0.1.0` release still resolve.
 - **Never disclose an exploitable vulnerability in a public issue or PR.** Use a draft security advisory, per the `security-audit` skill.
 
 ## Where the conventions live

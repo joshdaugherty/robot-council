@@ -1,7 +1,7 @@
 ---
 name: writing-issues
 description: >-
-  GitHub issue conventions for `joshdaugherty/robot-council`: imperative verb-first titles (or
+  GitHub issue conventions for `robot-council/core`: imperative verb-first titles (or
   symptom-first for bugs) with aggressive inline-code markup and no trailing period; a
   1–3-sentence lede that often opens with a provenance line (`Follow-up to #N.`,
   `Spun off from #N.`, `Part of #N.`); ordered section inventory (`## Why` / `## Background`,
@@ -21,7 +21,7 @@ description: >-
 # Writing Issues
 
 This skill captures the house style for GitHub issue titles and bodies in
-`joshdaugherty/robot-council`. An issue is a brief for whoever picks it up — often an autonomous
+`robot-council/core`. An issue is a brief for whoever picks it up — often an autonomous
 agent. Write it so the work is unambiguous before anyone touches code: state the *why*, pin
 down the *current* behavior, describe the *desired* outcome, and bound the scope explicitly.
 The defining feature of a good issue here is a crisp, testable **Acceptance criteria**
@@ -61,8 +61,8 @@ it). The REST form keeps working when the GraphQL quota behind `gh issue` is spe
 [`github-api-budget`](../../rules/github-api-budget.md)):
 
 ```bash
-gh api -X POST repos/joshdaugherty/robot-council/issues -f title='…' -F body=@body.md -f 'labels[]=<existing-label>'
-gh api -X PATCH repos/joshdaugherty/robot-council/issues/<n> -F body=@body.md
+gh api -X POST repos/robot-council/core/issues -f title='…' -F body=@body.md -f 'labels[]=<existing-label>'
+gh api -X PATCH repos/robot-council/core/issues/<n> -F body=@body.md
 ```
 
 `gh issue create --body-file body.md` and `gh issue edit <n> --body-file body.md` are the
@@ -211,7 +211,7 @@ Shared with `writing-pull-requests` — the short version:
   (`robot-council.members`), commands (`vendor/bin/pest`), env vars, version arrows
   (`` `13.31.0` → `13.32.0` ``).
 - **File paths are linked.** The target is the **absolute branch URL**
-  (`` [`src/RobotCouncil.php`](https://github.com/joshdaugherty/robot-council/blob/main/src/RobotCouncil.php) ``,
+  (`` [`src/RobotCouncil.php`](https://github.com/robot-council/core/blob/main/src/RobotCouncil.php) ``,
   `/tree/` for directories), exactly as the PR skill specifies; vendor refs may include line
   anchors (`…/PackageServiceProvider.php#L20-L35`).
 - **Fenced code blocks** (`php`, `yaml`, `bash`) quote the offending or proposed code in bug
@@ -228,7 +228,7 @@ Apply the labels that match the issue's nature; multiple are normal. **The label
 by hand, so re-list it before labeling rather than trusting the summary below:**
 
 ```bash
-gh api 'repos/joshdaugherty/robot-council/labels?per_page=100' --jq '.[] | "\(.name)\t\(.description)"'
+gh api 'repos/robot-council/core/labels?per_page=100' --jq '.[] | "\(.name)\t\(.description)"'
 ```
 
 Apply only labels that exist, choosing by each label's description. If an issue needs a label
@@ -259,11 +259,18 @@ title and, where available, the `Bug` issue type.
 
 ### Issue types
 
-GitHub issue types (`Task`, `Bug`, `Feature`) are an organization feature, and this repository
-belongs to a personal account: the GraphQL `repository.issueTypes` field is `null` here, so
-there is no type to set. The templates still declare `type:` so the mapping is ready if the
-repository moves to an organization — `Bug` for a bug, `Feature` for a feature, `Task` for a
-research spike or a follow-up cleanup.
+The `robot-council` organization enables the `Task`, `Bug`, and `Feature` issue types. Set exactly
+one on every issue: `Bug` for a bug, `Feature` for a feature, and `Task` for a research spike, a
+decision fork, a follow-up cleanup, or an epic. The templates declare the matching `type:` for
+issues filed through the web UI. When filing through REST, pass the type's name:
+
+```bash
+gh api -X POST repos/robot-council/core/issues -f title='…' -F body=@body.md -f type=Feature
+```
+
+**Read the type back after setting it.** GitHub's REST description says a type set without push
+access is silently dropped, so the call succeeds either way:
+`gh api repos/robot-council/core/issues/<n> --jq '.type.name'`.
 
 ### Execution mode — `afk` / `hitl` (exactly one — except on an `epic`)
 
@@ -300,8 +307,8 @@ That constraint is what makes an epic useful. A container with its own checklist
 **Wiring, and it is not the same thing as a dependency.** A sub-issue says *this is part of that*; a `blocked_by` edge says *this cannot start until that finishes*. Most epics need both, and they are set independently:
 
 ```bash
-id=$(gh api repos/joshdaugherty/robot-council/issues/<child> --jq '.id')     # numeric .id, NOT the issue number
-gh api -X POST repos/joshdaugherty/robot-council/issues/<parent>/sub_issues -F sub_issue_id=$id
+id=$(gh api repos/robot-council/core/issues/<child> --jq '.id')     # numeric .id, NOT the issue number
+gh api -X POST repos/robot-council/core/issues/<parent>/sub_issues -F sub_issue_id=$id
 ```
 
 **Sub-issues work across repositories.** The endpoint keys on the global database id, so a slice living in another repository attaches to an epic here exactly like a local one; listing it only in prose loses it. Read the set back with `GET …/sub_issues`, and see [`github-api-budget`](../../rules/github-api-budget.md) for why these are REST calls.
@@ -314,9 +321,9 @@ Run a few searches with varied terms and **include closed issues** (a fixed or w
 means *don't* refile):
 
 ```bash
-gh api "search/issues?q=repo:joshdaugherty/robot-council+<symptom or feature>&per_page=100" --jq '"matches: \(.total_count) (showing \(.items|length))", (.items[] | "\(if .pull_request then "PR " else "iss" end) #\(.number)  \(.title)")'
-gh api "search/issues?q=repo:joshdaugherty/robot-council+<affected file / class / config key>&per_page=100" --jq '"matches: \(.total_count) (showing \(.items|length))", (.items[] | "\(if .pull_request then "PR " else "iss" end) #\(.number)  \(.title)")'
-gh api "search/issues?q=repo:joshdaugherty/robot-council+<class of problem or label>&per_page=100" --jq '"matches: \(.total_count) (showing \(.items|length))", (.items[] | "\(if .pull_request then "PR " else "iss" end) #\(.number)  \(.title)")'
+gh api "search/issues?q=repo:robot-council/core+<symptom or feature>&per_page=100" --jq '"matches: \(.total_count) (showing \(.items|length))", (.items[] | "\(if .pull_request then "PR " else "iss" end) #\(.number)  \(.title)")'
+gh api "search/issues?q=repo:robot-council/core+<affected file / class / config key>&per_page=100" --jq '"matches: \(.total_count) (showing \(.items|length))", (.items[] | "\(if .pull_request then "PR " else "iss" end) #\(.number)  \(.title)")'
+gh api "search/issues?q=repo:robot-council/core+<class of problem or label>&per_page=100" --jq '"matches: \(.total_count) (showing \(.items|length))", (.items[] | "\(if .pull_request then "PR " else "iss" end) #\(.number)  \(.title)")'
 ```
 
 **Read the `matches:` line before the rows.** `search/issues` returns one page, so a query broader than the page size is answered with a silent prefix, and the truncated output is identical in shape to a query that genuinely found everything. In `UAMS-Web/uams-statamic` (measured 2026-09-06) a broad query reported hundreds of matches while a narrow one reported single digits, and nothing but the total distinguished the truncated page from the complete one.
@@ -367,11 +374,11 @@ config key are invented to show the shape.
 
 `````markdown
 ````
-Discovered while writing feature tests for the `robot-council` command. `JoshDaugherty\RobotCouncil\RobotCouncil::members()` declares an `array` return type, but when `robot-council.members` is absent from config it returns `null`, so PHP throws a `TypeError` and the command fails before printing anything.
+Discovered while writing feature tests for the `robot-council` command. `RobotCouncil\RobotCouncil::members()` declares an `array` return type, but when `robot-council.members` is absent from config it returns `null`, so PHP throws a `TypeError` and the command fails before printing anything.
 
 ## Root cause
 
-[`src/RobotCouncil.php`](https://github.com/joshdaugherty/robot-council/blob/main/src/RobotCouncil.php):
+[`src/RobotCouncil.php`](https://github.com/robot-council/core/blob/main/src/RobotCouncil.php):
 
 ```php
 public function members(): array

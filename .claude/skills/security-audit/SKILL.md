@@ -18,7 +18,7 @@ description: >-
 
 # Security audit (multi-agent, report-first)
 
-A repo-tailored security audit for `joshdaugherty/robot-council`. It runs a bundled multi-agent
+A repo-tailored security audit for `robot-council/core`. It runs a bundled multi-agent
 **workflow** that finds → adversarially verifies → triages, hands you a report to review, and only
 then discloses or files anything. The verification step is the point: most generic Laravel
 "findings" are false positives — Blade `{{ }}` already escapes, the query builder already binds
@@ -140,7 +140,7 @@ administrator or security manager of the repository, and a classic token needs t
 1. **Check for an existing advisory first.** For an administrator, the list includes drafts:
 
    ```bash
-   gh api "repos/joshdaugherty/robot-council/security-advisories?per_page=100" --jq '.[] | "\(.state)  \(.ghsa_id)  \(.summary)"'
+   gh api "repos/robot-council/core/security-advisories?per_page=100" --jq '.[] | "\(.state)  \(.ghsa_id)  \(.summary)"'
    ```
 
    Also run the "Check for an existing issue first" searches from
@@ -159,7 +159,7 @@ administrator or security manager of the repository, and a classic token needs t
      "cwe_ids": ["CWE-79"],
      "vulnerabilities": [
        {
-         "package": { "ecosystem": "composer", "name": "joshdaugherty/robot-council" },
+         "package": { "ecosystem": "composer", "name": "robot-council/core" },
          "vulnerable_version_range": "<= 1.2.0",
          "patched_versions": null
        }
@@ -179,7 +179,7 @@ administrator or security manager of the repository, and a classic token needs t
 3. **Create the draft** and give the user its URL:
 
    ```bash
-   gh api -X POST repos/joshdaugherty/robot-council/security-advisories --input build/security-advisory-<short-slug>.json --jq '.html_url'
+   gh api -X POST repos/robot-council/core/security-advisories --input build/security-advisory-<short-slug>.json --jq '.html_url'
    ```
 
    If the call fails (a permission or scope error, or a validation error), do **not** fall back to
@@ -192,7 +192,7 @@ administrator or security manager of the repository, and a classic token needs t
 A hardening item is one whose issue text tells a reader nothing they could exploit against any
 released version — for example, defense in depth where no current input reaches the sink. For each
 approved one, follow the [`writing-issues`](../writing-issues/SKILL.md) skill conventions exactly
-(invoke it), filing into `joshdaugherty/robot-council`:
+(invoke it), filing into `robot-council/core`:
 
 - **Title** — imperative, fix-oriented, with inline-code markup, no trailing period
   (e.g. ``Pass `Process` commands as arrays instead of shell strings``).

@@ -167,7 +167,7 @@ use const PHP_EOL;
 
 use Illuminate\Contracts\Filesystem\Cloud;
 use Illuminate\Support\Str;
-use JoshDaugherty\RobotCouncil\RobotCouncilServiceProvider;
+use RobotCouncil\RobotCouncilServiceProvider;
 
 use function Laravel\Prompts\confirm;
 ```

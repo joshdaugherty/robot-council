@@ -37,7 +37,7 @@ const scopeDescription =
 // Shared context — the quality lever. Every finder and verifier reasons from
 // this trust model so we surface real issues and reject framework false-positives.
 // ---------------------------------------------------------------------------
-const SHARED_CONTEXT = `PACKAGE UNDER TEST: \`joshdaugherty/robot-council\`, a Laravel package (namespace \`JoshDaugherty\\RobotCouncil\\\`, PHP ^8.4, Laravel 13 via \`illuminate/contracts\`) built on \`spatie/laravel-package-tools\`. It has no application of its own: it is installed into consuming Laravel applications, and \`src/RobotCouncilServiceProvider.php\` (\`configurePackage()\`) declares everything it registers — config file, views, view components, migrations, commands, routes, translations, assets. The package is young, so several domains may have no surface at all; confirm a surface exists before hunting for flaws in it.
+const SHARED_CONTEXT = `PACKAGE UNDER TEST: \`robot-council/core\`, a Laravel package (namespace \`RobotCouncil\\\`, PHP ^8.4, Laravel 13 via \`illuminate/contracts\`) built on \`spatie/laravel-package-tools\`. It has no application of its own: it is installed into consuming Laravel applications, and \`src/RobotCouncilServiceProvider.php\` (\`configurePackage()\`) declares everything it registers — config file, views, view components, migrations, commands, routes, translations, assets. The package is young, so several domains may have no surface at all; confirm a surface exists before hunting for flaws in it.
 
 TRUST BOUNDARIES — decide WHO controls each input before you rate severity:
 - END USER OF A CONSUMING APPLICATION (anonymous, or authenticated in that app) — reaches package code ONLY through what the package registers: routes and their controllers, middleware, Blade views and components rendered with request or stored data, jobs and listeners fed by user actions, and commands that process user-stored data. Controls request input, headers, uploaded files, and anything they stored that the package later reads back. Highest concern; anonymous outranks authenticated. Judge reachability under the package's SHIPPED DEFAULTS — the package cannot assume the consuming app puts auth or any other middleware in front of what it registers.
@@ -337,7 +337,7 @@ Set adjustedSeverity to the REAL impact given the trust boundary (an issue only 
 }
 
 function synthPrompt(reviewed) {
-  return `You are the security lead compiling the FINAL audit report for \`joshdaugherty/robot-council\`, a Laravel package (PHP 8.4, Laravel 13) installed into consuming applications.
+  return `You are the security lead compiling the FINAL audit report for \`robot-council/core\`, a Laravel package (PHP 8.4, Laravel 13) installed into consuming applications.
 
 ${SHARED_CONTEXT}
 

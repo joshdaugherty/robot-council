@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace JoshDaugherty\RobotCouncil;
+namespace RobotCouncil;
 
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;

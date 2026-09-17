@@ -42,7 +42,7 @@ A **Laravel package** (`joshdaugherty/robot-council`), not an application. It wa
 
 Rules (always loaded) — follow them; don't restate them:
 
-- **Shipping:** `adversarial-review` (verify before a change ships or a claim is published), `pre-merge-check` (the nine steps before merging), `sync-pr-branch` (bring a branch current, and the inputs its checks read), `closing-a-ticket` (what "done" means).
+- **Shipping:** `adversarial-review` (verify before a change ships or a claim is published), `pre-merge-check` (the judgment steps before merging), `sync-pr-branch` (bring a branch current, and the inputs its checks read), `closing-a-ticket` (what "done" means).
 - **Evidence:** `an-empty-result-is-not-evidence`, `measurement-parity`.
 - **Local processes and trees:** `long-running-commands`, `worktrees`.
 - **GitHub:** `github-api-budget`, `filing-defects-across-repos`, `design-decision-forks`.

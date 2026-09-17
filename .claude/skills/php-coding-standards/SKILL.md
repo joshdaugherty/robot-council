@@ -304,7 +304,25 @@ unset(
 );
 ```
 
-## 14. Verification
+## 14. Architecture presets (`tests/ArchTest.php`)
+
+Pest's `php()`, `security()`, and `strict()` presets run over the package's namespaces (`src/`,
+`database/factories/`), not `tests/`, and fail the suite on:
+
+- **Classes** — every class `final`, no `abstract` classes, and no `protected` methods. When a
+  parent declares a method `protected` that you must override (the facade's
+  `getFacadeAccessor()`), widen it to `public`, which PHP allows, and add the file to the
+  `MakeInheritedMethodVisibilitySameAsParentRector` skip in `rector.php`, which would otherwise
+  narrow it back. `final` means consumers cannot extend a class, so an extension point has to be
+  designed in: a contract, a container binding, or configuration.
+- **Strictness** — `declare(strict_types=1)` and strict comparison (`===`, `!==`, never `==`).
+- **Functions** — no debugging or output functions (`dd`, `dump`, `ray`, `var_dump`, `print_r`,
+  `var_export`, `echo`, `print`, `die`, and more), no `sleep` or `usleep`, and none of the
+  functions `security()` bans (`md5`, `sha1`, `rand`, `mt_rand`, `uniqid`, `eval`, `exec`,
+  `shell_exec`, `system`, `unserialize`, `extract`, and more). The full lists are in
+  `vendor/pestphp/pest/src/ArchPresets/`.
+
+## 15. Verification
 
 - Run `vendor/bin/pint --dirty` before finalizing; it fixes the files with uncommitted changes.
   (`--test` only reports and fixes nothing.) Formatting locally matters here: the CI `pint` job

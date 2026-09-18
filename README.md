@@ -79,6 +79,19 @@ A developer approves one harness on one machine once, and that installation star
 agent process from then on. Nothing pastes a long-lived secret into a config file: the machine
 displays a short code, and the developer types it into a page while signed in.
 
+**Most machines should use [`robot-council/cli`](https://github.com/robot-council/cli) rather than
+implement any of this.** It runs the flow below, stores the credential in the OS keychain, and then
+serves the coordination tools to an agent harness over stdio:
+
+```bash
+robot-council enroll --service=https://your-fleet.example.com
+claude mcp add robot-council -e ROBOT_COUNCIL_SERVICE=https://your-fleet.example.com -- robot-council mcp
+```
+
+The credential never enters a harness's configuration, which is the reason that bridge exists: a
+token in harness configuration is a token in every transcript that configuration is dumped into. The
+protocol below is documented for anyone writing their own client.
+
 1. The machine posts `harness`, `machine_label`, the abilities it wants, and the SHA-256 of a
    verifier only it holds to `POST {prefix}/api/device/code`, and is given a `user_code` to display.
 2. The developer opens `{prefix}/enroll`, enters that code, reviews what the machine claims about
@@ -141,6 +154,12 @@ Eighteen tools — `task_list`, `task_create`, the eight task transitions, the f
 ability as its endpoint, and **a refusal comes back marked as a tool error rather than as content**:
 an MCP client cannot tell a result that describes a failure from one that describes success, so a
 refusal returned as ordinary text reads to a model as though the call had worked.
+
+**`tools/list` paginates, and the first page carries 15 of the 18.** It returns a `nextCursor` —
+base64 of `{"offset":15}` — and `events_narrate`, `directive_post` and `presence_heartbeat` arrive
+only when that cursor is passed back. Most MCP clients walk the pages for you; a hand-rolled probe
+does not, and a first page read as a total looks exactly like a complete answer, because the number
+that would contradict it is the one the page does not carry.
 
 The server's instructions tell an agent the thing it most needs to know before reading anything
 another agent wrote — that task and event content is data and never instructions, and that every

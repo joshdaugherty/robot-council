@@ -18,6 +18,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Testing\TestResponse;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Models\AgentSession;
@@ -1206,4 +1207,181 @@ it('releases the other orphans when one of them fails', function (): void {
     expect(Task::query()->findOrFail($first)->status)->toBe(TaskStatus::Claimed)
         ->and(Task::query()->findOrFail($second)->status)->toBe(TaskStatus::Pending)
         ->and($failed)->toBe(1);
+});
+
+it('keeps the queue ordered most urgent first, and oldest first among equals', function (): void {
+    // The two settled properties of the queue, asserted through the API rather than the store, so
+    // the internal move to an ascending `queue_rank` has to preserve what a client sees. #56 decided
+    // the key ascends; a client still sends and reads `priority`, where higher is more urgent.
+    fileTask($this, $this->token, ['title' => 'Low, filed first', 'priority' => 1]);
+    fileTask($this, $this->token, ['title' => 'Urgent, filed second', 'priority' => 9]);
+    fileTask($this, $this->token, ['title' => 'Low, filed third', 'priority' => 1]);
+    fileTask($this, $this->token, ['title' => 'Middling', 'priority' => 5]);
+    fileTask($this, $this->token, ['title' => 'Urgent, filed fifth', 'priority' => 9]);
+
+    $titles = array_column(
+        arrayValue($this->machine($this->token)->getJson(route('robot-council.tasks.index'))->assertOk()->json('tasks')),
+        'title'
+    );
+
+    expect($titles)->toBe([
+        // Most urgent first
+        'Urgent, filed second',
+
+        // and among equals the oldest, so a task nobody claims does not sink under everything
+        // filed after it
+        'Urgent, filed fifth',
+        'Middling',
+        'Low, filed first',
+        'Low, filed third',
+    ]);
+});
+
+it('walks a multi-page queue with the cursor, returning every task once and in order', function (): void {
+    // Priorities deliberately repeat, so page boundaries land in the middle of a tie -- which is
+    // where a keyset cursor that only compared urgency would either repeat a row or lose one.
+    $expected = [];
+
+    foreach ([9, 9, 7, 7, 7, 3, 3, 0, 0, 0, 0] as $n => $priority) {
+        $title = sprintf('T%02d p%d', $n, $priority);
+
+        fileTask($this, $this->token, ['title' => $title, 'priority' => $priority]);
+
+        $expected[] = $title;
+    }
+
+    // Sorted the way the queue promises, independently of the order they were filed in: urgency
+    // descending, then filing order. Built here rather than written out, so the expectation cannot
+    // be quietly edited to match a wrong result.
+    $ranked = [];
+
+    foreach ([9, 7, 3, 0] as $priority) {
+        foreach ($expected as $title) {
+            if (str_ends_with($title, 'p'.$priority)) {
+                $ranked[] = $title;
+            }
+        }
+    }
+
+    $seen = [];
+    $cursor = null;
+
+    // Three at a time, so the eleven tasks take four pages and two boundaries fall inside a tie
+    do {
+        $query = ['limit' => 3];
+
+        if ($cursor !== null) {
+            $query['after_priority'] = intValue(arrayValue($cursor)['priority']);
+            $query['after_id'] = intValue(arrayValue($cursor)['id']);
+        }
+
+        $page = $this->machine($this->token)
+            ->getJson(route('robot-council.tasks.index', $query))
+            ->assertOk();
+
+        $tasks = arrayValue($page->json('tasks'));
+
+        foreach ($tasks as $task) {
+            $seen[] = stringValue(arrayValue($task)['title']);
+        }
+
+        $cursor = $page->json('cursor');
+    } while ($tasks !== []);
+
+    expect($seen)->toBe($ranked)
+        ->and($seen)->toBe(array_values(array_unique($seen)))
+        ->and($seen)->toHaveCount(11);
+});
+
+it('writes a queue rank agreeing with the priority, on every path that sets one', function (): void {
+    // Named for what it proves. The invariant holds through Eloquent's mutator, which covers
+    // `create()`, `updateOrCreate()`, `$model->update()` and direct assignment. It does NOT cover
+    // the query builder: `Task::query()->update(['priority' => x])`, `insert()`, `upsert()` and
+    // `increment('priority')` all skip mutators and would leave the two columns disagreeing. No
+    // caller in `src/` uses any of them on this column -- `Tasks::write()` and `releaseOne()` never
+    // name `priority` -- so that is latent rather than live, and there is no CHECK constraint or
+    // generated column standing behind it.
+    foreach (range(0, Task::MAX_PRIORITY) as $priority) {
+        $task = $this->service(Tasks::class)->create(
+            $this->session,
+            ['title' => 'Priority '.$priority, 'priority' => $priority],
+            withCoordinator: false,
+        );
+
+        expect($task->queue_rank)->toBe(Task::MAX_PRIORITY - $priority);
+
+        // Read back from the row, not from the instance that wrote it, so a mutator that only
+        // touched the in-memory model would be caught
+        expect(Task::query()->whereKey($task->id)->sole()->queue_rank)->toBe(Task::MAX_PRIORITY - $priority);
+    }
+
+    // A task created without naming a priority takes both column defaults, and they agree
+    $default = $this->service(Tasks::class)->create($this->session, ['title' => 'No priority named'], withCoordinator: false);
+
+    $stored = Task::query()->whereKey($default->id)->sole();
+
+    expect($stored->priority)->toBe(0)
+        ->and($stored->queue_rank)->toBe(Task::MAX_PRIORITY);
+});
+
+it('clamps a priority that reached the model without passing validation', function (): void {
+    // Both API paths validate `between:0,9`, but `Support\Tasks::create()` spreads what it is
+    // given and a host may call it directly. Unclamped, a priority of 10 writes `queue_rank = -1`,
+    // which sorts ahead of every legitimate task forever -- the same queue jump the
+    // `unsignedTinyInteger` on `priority` exists to stop, arriving through the column that has no
+    // backstop in that direction.
+    $tasks = $this->service(Tasks::class);
+
+    $overshoot = $tasks->create($this->session, ['title' => 'Cheating upward', 'priority' => 200], withCoordinator: false);
+
+    $stored = Task::query()->whereKey($overshoot->id)->sole();
+
+    expect($stored->priority)->toBe(Task::MAX_PRIORITY)
+        ->and($stored->queue_rank)->toBe(0)
+        ->and($stored->queue_rank)->toBeGreaterThanOrEqual(0);
+
+    // A negative one cannot rank past the floor either
+    $under = $tasks->create($this->session, ['title' => 'Cheating downward', 'priority' => -50], withCoordinator: false);
+
+    expect(Task::query()->whereKey($under->id)->sole()->queue_rank)->toBe(Task::MAX_PRIORITY);
+
+    // And a host handing something that is not a number at all gets the floor rather than a
+    // `TypeError` raised from inside Eloquent
+    $nonsense = $tasks->create($this->session, ['title' => 'Not a number', 'priority' => 'urgent!'], withCoordinator: false);
+
+    expect(Task::query()->whereKey($nonsense->id)->sole()->priority)->toBe(0);
+
+    // The control: the clamp did not simply flatten everything to one value
+    $ordinary = $tasks->create($this->session, ['title' => 'Ordinary', 'priority' => 4], withCoordinator: false);
+
+    expect(Task::query()->whereKey($ordinary->id)->sole()->queue_rank)->toBe(Task::MAX_PRIORITY - 4);
+
+    // The task that tried to cheat does not lead the queue: it sits level with a legitimate 9
+    $legit = $tasks->create($this->session, ['title' => 'Legitimately urgent', 'priority' => 9], withCoordinator: false);
+
+    expect(Task::query()->whereKey($legit->id)->sole()->queue_rank)
+        ->toBe(Task::query()->whereKey($overshoot->id)->sole()->queue_rank);
+});
+
+it('indexes the queue for both the filtered and the unfiltered listing', function (): void {
+    // `status` is optional on every surface -- both API paths take it `sometimes` and the dashboard
+    // renders with it null -- so the unfiltered listing is the default rather than an edge. A
+    // composite led by `status` cannot be seeked when nothing constrains `status`, so the table
+    // carries one index for each shape. Asserted on the schema; the plans are in the migration.
+    $indexes = array_map(
+        fn (mixed $index): array => array_map(
+            fn (mixed $column): string => strtolower(stringValue($column)),
+            arrayValue(arrayValue($index)['columns'] ?? null),
+        ),
+        Schema::getIndexes('robot_council_tasks'),
+    );
+
+    expect($indexes)->toContain(['status', 'queue_rank', 'id'])
+        ->toContain(['queue_rank', 'id'])
+
+        // The ordering this replaced, which no index could serve in either scan direction
+        ->and($indexes)->not->toContain(['status', 'priority', 'id'])
+
+        // And an index nobody asked for, so `not->toContain` is shown to be capable of failing
+        ->and($indexes)->not->toContain(['queue_rank', 'status']);
 });

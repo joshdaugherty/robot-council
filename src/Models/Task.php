@@ -6,6 +6,7 @@ namespace RobotCouncil\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
@@ -24,6 +25,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $description
  * @property TaskStatus $status
  * @property int $priority
+ * @property int $queue_rank
  * @property array<string, mixed>|null $payload
  * @property array<string, mixed>|null $result
  * @property int|null $claimed_by
@@ -70,6 +72,52 @@ final class Task extends Model
     public const int MAX_PRIORITY = 9;
 
     /**
+     * Urgency, and the ascending key the queue is actually ordered by.
+     *
+     * Setting `priority` sets both columns, in one assignment, so nothing can give them disagreeing
+     * values through the model -- including `Support\Tasks::create()`, which a host may call
+     * directly. The queue orders by `queue_rank` ascending because `order by priority desc, id asc`
+     * matches no single-direction b-tree in either scan direction, and Laravel's `Blueprint::index()`
+     * cannot declare a direction; ascending, an index can be walked instead of sorted. No API serves
+     * this column: a client sends and reads `priority`, where higher is still more urgent, and
+     * `TaskList::describe()` names the fields it returns one by one.
+     *
+     * Public rather than protected, because Pest's `strict()` preset forbids protected methods in
+     * the package's namespaces. Laravel finds an attribute mutator by method name and does not care
+     * about its visibility.
+     *
+     * **Clamped here, not only at the edge.** Both API paths validate `between:0,9`, but
+     * `Support\Tasks::create()` spreads what it is given and a host may call it directly -- and an
+     * unclamped `priority` of 10 writes a `queue_rank` of -1, which sorts ahead of every legitimate
+     * task forever. That is the same queue-jump the `unsignedTinyInteger` on `priority` exists to
+     * stop, arriving through the column that has no such backstop in the direction that matters:
+     * `priority` is unsigned on MySQL and signed `smallint` on Postgres, so one out-of-range write
+     * is a permanent queue jump on two engines and a 500 or a silent disagreement on the third.
+     * Clamping rather than throwing, because that is what `TaskList` and `FleetFeed` already do with
+     * a caller's bounds.
+     *
+     * Taking `mixed` rather than `int` for the reason CLAUDE.md gives for `Access\Tokens` and
+     * `Console\Argument`: a narrower parameter turns a host's bad value into an uncaught `TypeError`
+     * from inside vendor code.
+     *
+     * `never` for the read side because there is no accessor: reading `priority` returns the column
+     * as the `integer` cast gives it.
+     *
+     * @return Attribute<never, mixed> The urgency being set, which writes `priority` and `queue_rank`.
+     */
+    public function priority(): Attribute
+    {
+        return Attribute::set(function (mixed $value): array {
+            $priority = max(0, min(self::MAX_PRIORITY, is_numeric($value) ? (int) $value : 0));
+
+            return [
+                'priority' => $priority,
+                'queue_rank' => self::MAX_PRIORITY - $priority,
+            ];
+        });
+    }
+
+    /**
      * The attribute casts.
      *
      * Public rather than protected, because Pest's `strict()` preset forbids protected methods in
@@ -83,6 +131,7 @@ final class Task extends Model
             'parent_task_id' => 'integer',
             'status' => TaskStatus::class,
             'priority' => 'integer',
+            'queue_rank' => 'integer',
             'payload' => 'array',
             'result' => 'array',
             'claimed_by' => 'integer',

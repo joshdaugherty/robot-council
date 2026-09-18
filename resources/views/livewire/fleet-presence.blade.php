@@ -68,7 +68,7 @@
                         </thead>
                         <tbody>
                             @foreach ($locks as $lock)
-                                <tr wire:key="lock-{{ $lock['fence'] }}-{{ $loop->index }}">
+                                <tr wire:key="lock-{{ $lock['id'] }}">
                                     <td class="font-medium">{{ $lock['name'] }}</td>
 
                                     <td>
@@ -77,6 +77,14 @@
                                         @else
                                             <span class="opacity-60">nobody</span>
                                         @endif
+
+                                        {{-- Who had it last, which is what tells a reader whether a
+                                             lock is being handed round or has sat with one holder --}}
+                                        @if ($lock['previous_holder'])
+                                            <div class="text-xs opacity-60">
+                                                after {{ $lock['previous_holder']['github_login'] ?? 'an unknown account' }}
+                                            </div>
+                                        @endif
                                     </td>
 
                                     <td>{{ $lock['fence'] }}</td>
@@ -84,8 +92,18 @@
                                     {{-- A lapsed lease is shown rather than hidden: a row that
                                          still names a holder whose lease has run out is exactly
                                          what a developer is looking for --}}
-                                    <td class="whitespace-nowrap text-xs {{ $lock['held'] ? 'opacity-70' : 'text-warning' }}">
-                                        {{ $lock['lease'] }}
+                                    {{-- A lapsed lease is marked with a badge rather than coloured
+                                         text: `text-warning` measures 1.76:1 on this card and fails
+                                         AA at both sizes, and the layout pins `data-theme="light"`
+                                         so the dark token never applies. The badge pairs the same
+                                         colour with `--color-warning-content` at 5.24:1. A released
+                                         lock is the ordinary case and is not marked at all. --}}
+                                    <td class="whitespace-nowrap text-xs">
+                                        @if ($lock['lapsed'])
+                                            <span class="badge badge-sm badge-warning">{{ $lock['lease'] }}</span>
+                                        @else
+                                            <span class="opacity-70">{{ $lock['lease'] }}</span>
+                                        @endif
                                     </td>
                                 </tr>
                             @endforeach

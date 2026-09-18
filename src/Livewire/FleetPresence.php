@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RobotCouncil\Livewire;
 
+use Carbon\CarbonInterface;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Carbon;
 use Livewire\Attributes\Locked;
@@ -76,17 +77,29 @@ final class FleetPresence extends Component
      * looking for, so it is said in words rather than left to be worked out from a timestamp.
      *
      * @param  array<string, mixed>  $lock  The lock as the store described it.
-     * @return array<string, mixed> The lock, with a `lease`.
+     * @return array<string, mixed> The lock, with a `lease` and whether it has `lapsed`.
      */
     private function withLapse(array $lock): array
     {
         $expires = $lock['expires_at'] ?? null;
 
-        $lock['lease'] = match (true) {
-            ! \is_string($expires) => 'never held',
-            $lock['held'] === true => 'expires '.Carbon::parse($expires)->diffForHumans(),
-            default => 'lapsed '.Carbon::parse($expires)->diffForHumans(),
-        };
+        // Every release path in `Support\Locks` nulls `holder_id` **and** `expires_at`, so a
+        // cleanly released lock arrives here with no expiry at all. Reading that as "never held"
+        // was wrong on both counts: the row is kept precisely because it *was* held, for the fence
+        // it carries, and a released lock is the ordinary case rather than the alarming one.
+        if (! \is_string($expires)) {
+            $lock['lease'] = 'free';
+            $lock['lapsed'] = false;
+
+            return $lock;
+        }
+
+        // Absolute, because `diffForHumans()` on its own renders "1 minute from now", which reads
+        // badly beside a verb and made an assertion for "expires in" unable to ever match
+        $distance = Carbon::parse($expires)->diffForHumans(syntax: CarbonInterface::DIFF_ABSOLUTE);
+
+        $lock['lease'] = $lock['held'] === true ? 'expires in '.$distance : 'lapsed '.$distance.' ago';
+        $lock['lapsed'] = $lock['held'] !== true;
 
         return $lock;
     }

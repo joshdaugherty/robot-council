@@ -68,20 +68,21 @@ final class FleetPresence
             // eager-loaded above, so a null here would mean a row the schema forbids
             'harness' => $session->installation->harness,
             'machine_label' => $session->installation->machine_label,
-            'project_id' => $session->project_id,
 
             // Read from the row rather than recomputed from `last_seen_at`. #24 made the row the
             // decision, and a view that derived the status itself would disagree with the sweep
             // for as long as the sweep had not run -- showing `stale` to a developer while every
             // conditional update in the package still treated the session as active.
             'status' => $session->status->value,
-            'last_seen_at' => $session->last_seen_at->toIso8601String(),
-            'seconds_since_contact' => max(0, $now->diffInSeconds($session->last_seen_at, false) * -1),
+            // Cast, because Carbon 3's `diffInSeconds()` returns a float and `last_seen_at` is a
+            // `dateTime` column with no microseconds while `now()` has them -- so the difference is
+            // fractional on every read and rendered straight it reads `30.482913s ago`
+            'seconds_since_contact' => (int) max(0, $now->diffInSeconds($session->last_seen_at, false) * -1),
         ])->all());
     }
 
     /**
-     * Every named lock, longest-held first.
+     * Every named lock, by name.
      *
      * A lapsed lease is returned rather than hidden, with `held` saying which it is. A row whose
      * lease has run out but which still names a holder is precisely the state a developer is
@@ -105,6 +106,10 @@ final class FleetPresence
         $now = Carbon::now();
 
         return array_values($locks->map(fn (Lock $lock): array => [
+            // The row's own key. A `wire:key` built from `fence` and a loop index is neither stable
+            // nor unique: two locks routinely share a fence, so one row's key can be taken over by
+            // another between polls, and a re-acquire changes the key of a row that did not move.
+            'id' => $lock->id,
             'name' => $lock->name,
             'fence' => $lock->fence,
             'held' => $lock->isHeldAt($now),
@@ -119,7 +124,6 @@ final class FleetPresence
                 'session_id' => $lock->previous_holder_id,
                 'github_login' => $logins[$lock->previous_holder_id] ?? null,
             ],
-            'acquired_at' => $lock->acquired_at?->toIso8601String(),
             'expires_at' => $lock->expires_at?->toIso8601String(),
         ])->all());
     }

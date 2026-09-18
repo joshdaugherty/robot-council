@@ -8,6 +8,7 @@ declare(strict_types=1);
  * @command  vendor/bin/pest --compact tests/FleetPresenceTest.php
  */
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
@@ -15,6 +16,7 @@ use RobotCouncil\Access\Ability;
 use RobotCouncil\Livewire\FleetPresence;
 use RobotCouncil\Models\AgentSessionStatus;
 use RobotCouncil\Models\Lock;
+use RobotCouncil\Support\FleetPresence as Presence;
 use RobotCouncil\Support\Locks;
 
 beforeEach(function (): void {
@@ -64,13 +66,22 @@ it('keeps a gone session on the page rather than hiding it', function (): void {
 });
 
 it('lists a held lock with its holder, fence and lease', function (): void {
-    app(Locks::class)->acquire($this->session, 'deploy', 60, asCoordinator: false);
+    // Held by a *second* developer, because this component renders both panels and the first
+    // developer's login is in the sessions table on every render -- so `assertSee('octodev')` here
+    // would pass with the entire holder cell replaced by the word `nobody`.
+    $other = $this->enrollDeveloper(77, login: 'somebody-else');
+
+    $installation = $this->approveInstallation($other, [Ability::LocksAcquire->value], machineLabel: 'their-box');
+
+    [$theirs] = $this->startAgentSession($installation);
+
+    app(Locks::class)->acquire($theirs, 'deploy', 60, asCoordinator: false);
 
     Livewire::test(FleetPresence::class)
         ->assertSee('deploy')
-        ->assertSee('octodev')
+        ->assertSee('somebody-else')
         ->assertSeeHtml('<td>1</td>')
-        ->assertSee('expires');
+        ->assertSee('expires in');
 });
 
 it('shows a lapsed lease as lapsed rather than hiding the row', function (): void {
@@ -80,9 +91,11 @@ it('shows a lapsed lease as lapsed rather than hiding the row', function (): voi
     // developer is looking for and the one a filtered list would conceal
     Lock::query()->where('name', 'deploy')->update(['expires_at' => Carbon::now()->subMinute()]);
 
-    $rendered = Livewire::test(FleetPresence::class);
-
-    $rendered->assertSee('deploy')->assertSee('lapsed')->assertDontSee('expires in');
+    Livewire::test(FleetPresence::class)
+        ->assertSee('deploy')
+        ->assertSee('lapsed')
+        ->assertDontSee('expires in')
+        ->assertSeeHtml('badge-warning');
 });
 
 it('renders a hostile machine label as text', function (): void {
@@ -117,4 +130,57 @@ it('shows presence through the gate, and refuses a stranger', function (): void 
         ->get(route('robot-council.dashboard'))
         ->assertForbidden()
         ->assertDontSee('workbench-01');
+});
+
+it('calls a released lock free rather than never held, and does not alarm about it', function (): void {
+    // Every release path in `Support\Locks` nulls `holder_id` **and** `expires_at`, so a released
+    // lock arrives with no expiry at all. Reading that as "never held" was wrong twice over: the
+    // row is kept precisely because it was held, for the fence it carries, and a released lock is
+    // the ordinary case rather than the one worth a warning.
+    $locks = app(Locks::class);
+
+    $locks->acquire($this->session, 'deploy', 60, asCoordinator: false);
+    $locks->release($this->session, 'deploy', asCoordinator: false);
+
+    Livewire::test(FleetPresence::class)
+        ->assertSee('deploy')
+        ->assertSee('free')
+        ->assertDontSee('never held')
+        ->assertDontSeeHtml('badge-warning');
+});
+
+it("loads each session's installation without a query per row", function (): void {
+    // The harness and the machine label live on the installation, and this list hydrates many
+    // sessions. `Model::preventLazyLoading()` only raises on a query that returned more than one
+    // row, so the second session is what makes this able to fail at all.
+    $second = $this->approveInstallation($this->developer, [], machineLabel: 'laptop');
+
+    $this->startAgentSession($second);
+
+    Model::preventLazyLoading();
+
+    try {
+        Livewire::test(FleetPresence::class)
+            ->assertSee('workbench-01')
+            ->assertSee('laptop');
+    } finally {
+        // Static, and it outlives the test that set it
+        Model::preventLazyLoading(false);
+    }
+});
+
+it('reports whole seconds since contact, not a fraction of one', function (): void {
+    // Carbon 3's `diffInSeconds()` returns a float, and `last_seen_at` is a `dateTime` column with
+    // no microseconds while `Carbon::now()` carries them -- so the difference is fractional on
+    // every read, and rendered straight the page said `30.482913s ago`.
+    $this->session->forceFill(['last_seen_at' => Carbon::now()->subSeconds(30)])->save();
+
+    $described = app(Presence::class)->sessions(10);
+
+    expect($described[0]['seconds_since_contact'])->toBeInt();
+
+    // And the rendered form, because the store returning an int is only half of it
+    $html = Livewire::test(FleetPresence::class)->html();
+
+    expect($html)->toMatch('/\d+s ago/')->not->toMatch('/\d+\.\d+s ago/');
 });

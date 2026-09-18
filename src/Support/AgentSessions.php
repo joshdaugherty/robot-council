@@ -48,6 +48,10 @@ final class AgentSessions
      */
     public function start(Installation $installation, ?string $projectId): IssuedCredential
     {
+        // Bounded here as well as at the endpoint, because this is a public method a host may call
+        // directly and the value reaches other developers' agents through the enrollment event
+        ProjectId::ensure($projectId);
+
         return DB::transaction(function () use ($installation, $projectId): IssuedCredential {
             $current = $this->locked($installation);
 

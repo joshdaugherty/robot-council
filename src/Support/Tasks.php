@@ -60,6 +60,8 @@ final class Tasks
      */
     public function create(AgentSession $session, array $attributes, bool $withCoordinator): Task
     {
+        $this->withinBounds($attributes);
+
         return DB::transaction(function () use ($session, $attributes, $withCoordinator): Task {
             $task = Task::query()->create([
                 ...$attributes,
@@ -392,5 +394,56 @@ final class Tasks
         // Everything the write tested still holds, so the row moved between the write and this
         // read. Whoever moved it got there first.
         return Outcome::Conflict;
+    }
+
+    /**
+     * Refuse text the package will not store, before an engine decides what that means.
+     *
+     * **The column is not the bound, for two reasons.** It means something different on each engine:
+     * `varchar` is refused past its length by Postgres and MySQL and stored whole by SQLite, so one
+     * call writes a 300-character title on one engine and answers 500 on the other two. And its
+     * width is not even ours -- `$table->string('title')` takes `Schema::$defaultStringLength`,
+     * a public static a host may lower, so the migrations pin these columns to the constants below
+     * and the bound lives here. Both endpoints validate this already; `create()` is a public method
+     * a host may call directly, and it spreads what it is given straight into the insert.
+     *
+     * `description` is a `text` column, which on MySQL holds roughly four times `MAX_DESCRIPTION`
+     * characters. Its bound is policy rather than capacity: like a title, it reaches other
+     * developers' agents through `TaskList`.
+     *
+     * **Refused rather than truncated, which is the other half of the pattern #57 asks to settle.**
+     * `priority` is an ordinal with a defined range, so `Models\Task` clamps it: 10 means "as urgent
+     * as can be", and 9 says the same thing. A title is content, and shortening content changes what
+     * it says -- silently, in a field other developers' agents read. Two of the three engines already
+     * refuse it; this makes the third agree, and names the column instead of surfacing a driver
+     * error.
+     *
+     * @param  array<string, mixed>  $attributes  What the caller is asking to store.
+     *
+     * @throws InvalidArgumentException When a field is longer than its column.
+     */
+    private function withinBounds(array $attributes): void
+    {
+        // The one field here that does NOT stay behind `TaskList`'s visibility rule: `create()`
+        // puts it into the feed's `meta` below, and `FleetFeed` serves that to every session. So it
+        // is bounded in charset as well as length, and by the one helper both stores share.
+        ProjectId::ensure($attributes['project_id'] ?? null);
+
+        $limits = ['title' => Task::MAX_TITLE, 'description' => Task::MAX_DESCRIPTION];
+
+        foreach ($limits as $field => $limit) {
+            $value = $attributes[$field] ?? null;
+
+            // Measured in characters, as the `max:` rule the endpoints apply does, so the store and
+            // the edge refuse the same values rather than nearly the same ones
+            if (\is_string($value) && mb_strlen($value) > $limit) {
+                throw new InvalidArgumentException(sprintf(
+                    "A task's %s is limited to %d characters, and this one is %d.",
+                    $field,
+                    $limit,
+                    mb_strlen($value)
+                ));
+            }
+        }
     }
 }

@@ -530,11 +530,72 @@ it('returns an event written after the session started', function (): void {
     expect(array_column(arrayValue($read->json('events')), 'body'))->toContain('Immediately after.');
 });
 
-it('indexes the two branches a reader is filtered on, and nothing redundant beside them', function (): void {
+it("does not let a reused session id hand one developer another developer's narration", function (): void {
+    // This is why `robot_council_events` carries `user_id`. There is no foreign key on
+    // `agent_session_id` (#50), so nothing nulls it when a session row goes -- and a reused id
+    // would re-point a dead session's events at whoever holds that id now. Reuse is reachable:
+    // Laravel's SQLite `compileTruncate` issues `delete from sqlite_sequence` beside the row
+    // delete, after which the next session takes id 1 again, and Postgres's is
+    // `truncate ... restart identity`.
+    [$theirs] = sessionFor($this, $this->theirs, [Ability::EventsPost->value]);
+
+    $events = $this->service(FleetEvents::class);
+
+    $events->record(FleetEventType::Narration, $theirs, 'Theirs, from a session about to vanish.');
+    $events->record(FleetEventType::Directive, $theirs, 'A directive from the same vanishing session.');
+
+    $deadId = $theirs->id;
+
+    AgentSession::query()->whereKey($deadId)->delete();
+
+    // The events stay, still naming the id that has just been freed
+    expect(AgentSession::query()->whereKey($deadId)->exists())->toBeFalse()
+        ->and(FleetEvent::query()->where('agent_session_id', $deadId)->count())->toBeGreaterThan(1);
+
+    // Now MY developer takes that id. Written explicitly rather than by truncating, because the
+    // engines reuse ids by different routes and the point is what happens once one is reused.
+    $mineInstallation = $this->approveInstallation($this->mine, [Ability::EventsPost->value], machineLabel: 'recycler');
+
+    AgentSession::query()->insert([
+        'id' => $deadId,
+        'installation_id' => $mineInstallation->id,
+        'user_id' => keyValue($this->mine->getKey()),
+        'status' => 'active',
+        'last_seen_at' => now(),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $reused = AgentSession::query()->whereKey($deadId)->sole();
+
+    // The control for the whole test: the id really is mine now, so a filter that resolved through
+    // the live session table would match, and an absence below is that filter not doing so
+    expect(keyValue($reused->user_id))->toBe(keyValue($this->mine->getKey()));
+
+    [, $token] = sessionFor($this, $this->mine, [Ability::EventsPost->value]);
+
+    $read = $this->machine($token)->getJson(route('robot-council.events.index'))->assertOk();
+
+    $bodies = array_column(arrayValue($read->json('events')), 'body');
+
+    // The narration was another developer's and stays theirs, although I now hold the id it names
+    expect($bodies)->not->toContain('Theirs, from a session about to vanish.')
+
+        // The directive is a state change, so it reaches everyone even with its author's row gone
+        ->and($bodies)->toContain('A directive from the same vanishing session.');
+
+    $orphaned = collect(arrayValue($read->json('events')))
+        ->first(fn (mixed $event): bool => arrayValue($event)['body'] === 'A directive from the same vanishing session.');
+
+    // And it is still attributed to who wrote it, not to who holds the id. Resolved from the
+    // event's own `user_id`, so deleting the session loses the link to the row but not the fact.
+    expect(arrayValue(arrayValue($orphaned)['actor'])['github_login'])->toBe('otherdev');
+});
+
+it('indexes the branch a reader is filtered on, and nothing redundant beside it', function (): void {
     // Asserted on the schema rather than on a plan: a plan needs a seeded feed and two engines,
     // which is #62. What the schema can say is which indexes exist, and that matters in both
-    // directions -- a composite whose leftmost column is already indexed on its own is write cost
-    // on an append-only feed for a query no engine would choose the narrower index for.
+    // directions -- an index on a column nothing filters by is write cost on an append-only feed.
     //
     // Lower-cased because the engine decides the case it reports identifiers in, and this assertion
     // has to mean the same thing on SQLite, Postgres and MySQL.
@@ -546,13 +607,18 @@ it('indexes the two branches a reader is filtered on, and nothing redundant besi
         Schema::getIndexes('robot_council_events'),
     );
 
-    expect($indexes)->toContain(['agent_session_id', 'id'])
+    expect($indexes)->toContain(['user_id', 'id'])
         ->toContain(['type', 'id'])
 
-        // Each composite's leftmost column, which the composite already serves -- including the
-        // foreign key's own cascade and MySQL's requirement that its column be indexed
-        ->and($indexes)->not->toContain(['agent_session_id'])
+        // Each composite's leftmost column, which the composite already serves
+        ->and($indexes)->not->toContain(['user_id'])
         ->and($indexes)->not->toContain(['type'])
+
+        // `agent_session_id` is stored for provenance and filtered by nothing, so it carries no
+        // index in either shape. #48 put the composite here; #59 moved it to `user_id` with the
+        // filter branch that reads it.
+        ->and($indexes)->not->toContain(['agent_session_id'])
+        ->and($indexes)->not->toContain(['agent_session_id', 'id'])
 
         // And an index nobody asked for, so `not->toContain` is shown to be capable of failing
         ->and($indexes)->not->toContain(['posted_with_coordinator', 'id']);

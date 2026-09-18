@@ -23,6 +23,7 @@ use Illuminate\Support\Carbon;
  *
  * @property int $id
  * @property int|null $agent_session_id
+ * @property string|null $user_id
  * @property FleetEventType $type
  * @property string|null $body
  * @property array<string, mixed>|null $meta
@@ -32,6 +33,7 @@ use Illuminate\Support\Carbon;
  */
 #[Fillable([
     'agent_session_id',
+    'user_id',
     'type',
     'body',
     'meta',

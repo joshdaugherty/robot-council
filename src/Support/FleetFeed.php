@@ -72,17 +72,21 @@ final class FleetFeed
                 // Asked of the enum rather than hardcoded, so a later restricted type is
                 // restricted by declaring itself so rather than by somebody remembering to edit
                 // this clause. Getting that wrong fails open.
+                //
+                // The third branch reads the event's OWN `user_id`, recorded when it was written,
+                // rather than asking which live session holds its `agent_session_id` now. There is
+                // no foreign key on that column (#50), so a deleted session's id can be reissued to
+                // a different developer -- and a subquery against the live table would then serve
+                // that developer this event. The rule is about who posted, which is a fact from the
+                // past, so it is decided from what the past recorded.
                 $query->whereNotIn('type', FleetEventType::restrictedValues())
                     ->orWhere('posted_with_coordinator', true)
-                    ->orWhereIn(
-                        'agent_session_id',
-                        AgentSession::query()->select('id')->where('user_id', $reader->user_id)
-                    );
+                    ->orWhere('user_id', $reader->user_id);
             })
             ->orderBy('id')
             ->get();
 
-        $logins = $this->logins->forSessions($events->pluck('agent_session_id')->all());
+        $logins = $this->logins->forUsers($events->pluck('user_id')->all());
 
         /** @var list<array<string, mixed>> $described */
         $described = $events->map(fn (FleetEvent $event): array => $this->describe($event, $logins))->values()->all();
@@ -128,7 +132,7 @@ final class FleetFeed
             ->limit(max(1, min($limit, self::MAX_PAGE)))
             ->get();
 
-        $logins = $this->logins->forSessions($events->pluck('agent_session_id')->all());
+        $logins = $this->logins->forUsers($events->pluck('user_id')->all());
 
         return array_values($events->map(fn (FleetEvent $event): array => $this->describe($event, $logins))->all());
     }
@@ -137,7 +141,7 @@ final class FleetFeed
      * One event as a reader sees it, with the provenance the fleet decides trust on.
      *
      * @param  FleetEvent  $event  The event.
-     * @param  array<int, string>  $logins  GitHub logins, keyed by agent session ID.
+     * @param  array<string, string>  $logins  GitHub logins, keyed by host user key.
      * @return array<string, mixed> The event.
      */
     private function describe(FleetEvent $event, array $logins): array
@@ -152,9 +156,13 @@ final class FleetFeed
             // Derived by the server on every read, never taken from what the poster claimed
             'actor' => [
                 'session_id' => $event->agent_session_id,
-                'github_login' => $event->agent_session_id === null
+
+                // Keyed by the event's own `user_id` rather than by its session id, so a session
+                // row that has gone -- or whose id now belongs to somebody else -- cannot put the
+                // wrong developer's name on what somebody else said
+                'github_login' => $event->user_id === null
                     ? null
-                    : ($logins[$event->agent_session_id] ?? null),
+                    : ($logins[$event->user_id] ?? null),
                 'coordinator_direct' => $event->posted_with_coordinator,
             ],
         ];

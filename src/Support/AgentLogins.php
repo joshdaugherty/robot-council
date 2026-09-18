@@ -53,4 +53,34 @@ final class AgentLogins
 
         return $logins;
     }
+
+    /**
+     * The GitHub logins behind a set of host user keys.
+     *
+     * The same resolution as `forSessions()` without the hop through the session table, for callers
+     * that already hold the user key. The change feed is one: `robot_council_events` carries
+     * `user_id` precisely so that provenance survives the posting session's row being deleted, and
+     * resolving through the session id instead would re-bind a dead id to whoever holds it now --
+     * stamping one developer's login onto another developer's event.
+     *
+     * @param  array<mixed>  $userIds  The user keys referred to, some of them null.
+     * @return array<string, string> Logins, keyed by host user key.
+     */
+    public function forUsers(array $userIds): array
+    {
+        $ids = array_values(array_unique(array_filter($userIds, is_string(...))));
+
+        if ($ids === []) {
+            return [];
+        }
+
+        /** @var array<string, string> $logins */
+        $logins = GithubIdentity::query()
+            ->whereIn('user_id', $ids)
+            ->get(['user_id', 'github_login'])
+            ->pluck('github_login', 'user_id')
+            ->all();
+
+        return $logins;
+    }
 }

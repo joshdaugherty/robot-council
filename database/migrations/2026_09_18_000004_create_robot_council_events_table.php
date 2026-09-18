@@ -39,17 +39,40 @@ return new class extends Migration
 
             // Null for an event the service recorded rather than a session.
             //
-            // The index this column needs is the composite declared at the foot of this table, not
-            // a single-column one. `constrained()` emits a foreign key and no index, and only MySQL
-            // creates one server-side, so without something here this constraint's own delete
-            // cascade would be a full-table scan on Postgres and SQLite. A leftmost prefix serves
-            // that, and serves MySQL's requirement that a foreign-key column be indexed, so a
-            // standalone index beside the composite would be write cost on the hot append path for
-            // a query neither engine would choose it for.
-            $table->foreignId('agent_session_id')
-                ->nullable()
-                ->constrained('robot_council_agent_sessions')
-                ->nullOnDelete();
+            // **Deliberately not a foreign key**, which is the decision on robot-council/core#50.
+            // On InnoDB, inserting a child row takes a shared lock on the referenced parent, so
+            // every writer recording an event would reach for a session row *after* taking the feed
+            // sentinel, while the presence sweep takes the session row first and the sentinel
+            // second. That is a deadlock, and the worse half is that it is invisible: the lock is
+            // implicit, nothing in the code says it is being taken, and every writer added later
+            // inherits it. The rejected alternative was one global lock order maintained by every
+            // author, which #50 rejected on the evidence that it had already failed once.
+            //
+            // Nothing decides anything from it. It is provenance a reader can follow back to a
+            // session that may or may not still exist, and it carries no index, because nothing
+            // filters events by it -- both #29's visibility rule and the GitHub login are read from
+            // `user_id` below.
+            //
+            // That is not tidiness. Without the constraint nothing nulls this column when a session
+            // row goes, and **session ids are reused**, so anything resolved by looking this id up
+            // in the live session table would follow it to whoever holds it now.
+            $table->foreignId('agent_session_id')->nullable();
+
+            // The posting session's developer, denormalized at write time, exactly as
+            // `robot_council_tasks.user_id` is and for the same reason -- it survives the session
+            // row being deleted. Null for an event the service recorded rather than a session.
+            //
+            // **This is what makes #29's boundary safe without the foreign key.** The filter used
+            // to ask `agent_session_id IN (the reader's live sessions)`, which re-binds a stored id
+            // to whatever session holds it *now*. With no foreign key nulling it on delete, a
+            // reused id re-points a dead session's narration at a live one: measured, Laravel's
+            // SQLite `compileTruncate` issues `delete from sqlite_sequence` beside the row delete,
+            // after which the next session takes id 1 again, and Postgres's is `truncate ... restart
+            // identity`. One developer's restricted narration would then be served to another's
+            // agent, labeled with that other developer's login. Recorded here at write time, the
+            // rule is decided by who actually posted rather than by who holds the id later -- the
+            // same principle as `posted_with_coordinator` two columns down.
+            $table->string('user_id', 64)->nullable();
 
             // Likewise carried by `(type, id)` below rather than an index of its own
             $table->string('type', 64);
@@ -71,7 +94,8 @@ return new class extends Migration
             $table->timestamp('created_at')->nullable();
 
             // The two branches a reader's visibility is decided on, each with `id` beside it so a
-            // branch can be walked in feed order without a sort. #48 decided these ship now.
+            // branch can be walked in feed order without a sort. #48 decided these ship now, on
+            // `agent_session_id`; #59 moved the first to `user_id` when the filter's branch moved.
             //
             // **No query in this package can use them today, and that is deliberate.**
             // `FleetFeed::after()` reads in two phases: a primary-key range scan picks a window of
@@ -88,7 +112,7 @@ return new class extends Migration
             // partial index suits. It stays a filter because it reaches the query only as one
             // disjunct of an `OR` over a window already pinned by primary key, where no index on it
             // could be reached at all.
-            $table->index(['agent_session_id', 'id']);
+            $table->index(['user_id', 'id']);
             $table->index(['type', 'id']);
         });
     }

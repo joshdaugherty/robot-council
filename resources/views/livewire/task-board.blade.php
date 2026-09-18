@@ -22,7 +22,9 @@
         </div>
 
         @if ($tasks === [])
-            <p class="py-6 text-center opacity-60">Nothing in the queue.</p>
+            <p class="py-6 text-center opacity-60">
+                {{ $afterId === null ? 'Nothing in the queue.' : 'Nothing further -- this is past the end of the queue.' }}
+            </p>
         @else
             <div class="overflow-x-auto">
                 <table class="table table-sm">
@@ -74,7 +76,7 @@
                                 </td>
 
                                 <td class="whitespace-nowrap text-xs opacity-70">
-                                    {{ $task['created_at'] }}
+                                    {{ $task['age'] }}
                                 </td>
                             </tr>
                         @endforeach
@@ -82,12 +84,18 @@
                 </table>
             </div>
 
+        @endif
+
+        {{-- Outside the branch above, because a reader who has paged past the end still needs the
+             way back. Inside it, an exact multiple of the page size stranded them on an empty page
+             whose only escape was the filter button that was already active. --}}
+        @if ($afterId !== null || $hasMore)
             <div class="flex items-center justify-end gap-2 pt-2">
                 @if ($afterId !== null)
                     <button type="button" wire:click="showFirst" class="btn btn-sm btn-ghost">First page</button>
                 @endif
 
-                @if ($cursor && count($tasks) === \RobotCouncil\Livewire\TaskBoard::PER_PAGE)
+                @if ($hasMore && $cursor)
                     <button type="button"
                         wire:click="showNext({{ $cursor['priority'] }}, {{ $cursor['id'] }})"
                         class="btn btn-sm">Next page</button>

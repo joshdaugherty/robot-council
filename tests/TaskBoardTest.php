@@ -8,6 +8,7 @@ declare(strict_types=1);
  * @command  vendor/bin/pest --compact tests/TaskBoardTest.php
  */
 
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Livewire\TaskBoard;
@@ -65,11 +66,16 @@ it('lists a task with its content, status, priority and both sides of its proven
 
     $tasks->transition($task->id, TaskTransition::Claim, $this->session, asCoordinator: false);
 
+    // `assertSee` on the bare strings would not discriminate here. Every `TaskStatus` value is
+    // rendered as a filter-button label on every render, so `assertSee('claimed')` passes with the
+    // status column deleted; and `assertSee('7')` passes about 27% of the time on the `wire:id`
+    // alone -- measured at 0.274 over 20,000 samples of `Str::random(20)` -- which reads as flake
+    // rather than as a missing column.
     Livewire::test(TaskBoard::class)
         ->assertSee('Rebuild the search index')
         ->assertSee('acme/search')
-        ->assertSee(TaskStatus::Claimed->value)
-        ->assertSee('7')
+        ->assertSeeHtml('<span class="badge badge-sm">'.TaskStatus::Claimed->value.'</span>')
+        ->assertSeeHtml('<td>7</td>')
         ->assertSee('octodev');
 
     expect($theirs)->not->toBeNull();
@@ -105,10 +111,13 @@ it('marks a coordinator-created task without making the reader check who filed i
     app(Tasks::class)->create($coordinator, ['title' => 'Everyone stop'], withCoordinator: true);
     app(Tasks::class)->create($this->session, ['title' => 'An ordinary one'], withCoordinator: false);
 
-    $rendered = Livewire::test(TaskBoard::class)->html();
+    $board = Livewire::test(TaskBoard::class);
 
-    // The badge is rendered once, against the coordinator's task and not the other
-    expect(substr_count($rendered, 'coordinator'))->toBe(1);
+    // The count alone cannot say which row carries it, so the order is asserted too: the badge has
+    // to fall between the coordinator's title and the ordinary one's.
+    $board->assertSeeHtmlInOrder(['Everyone stop', 'coordinator', 'An ordinary one']);
+
+    expect(substr_count($board->html(), 'coordinator'))->toBe(1);
 });
 
 it('reaches a task beyond the first page through the cursor', function (): void {
@@ -190,8 +199,78 @@ it('widens to every task when asked for a status that is not one', function (): 
         ->assertSee('Visible regardless');
 });
 
-it('will not let a client move the cursor', function (): void {
-    // The cursor is a position in an ordering the server computed. Harmless to read here, since the
-    // reader may see every task, but it is the server's to issue.
+it('will not let the updates map rewrite the cursor', function (): void {
+    // `#[Locked]` guards the `updates` map and nothing else. `showNext()` is a public action, so a
+    // client may still move the cursor by calling it -- which costs nothing, because the reader may
+    // already see every task and an out-of-range cursor returns rows they could have paged to. What
+    // locking buys is that the cursor cannot be rewritten underneath a render.
     Livewire::test(TaskBoard::class)->set('afterId', 9999);
-})->throws(Exception::class);
+})->throws(CannotUpdateLockedPropertyException::class);
+
+it('lets the rendered button move the cursor, which is how paging works', function (): void {
+    // The companion to the test above, so that the guarantee recorded there is the true one
+    Livewire::test(TaskBoard::class)
+        ->call('showNext', 3, 42)
+        ->assertSet('afterPriority', 3)
+        ->assertSet('afterId', 42);
+});
+
+it('polls on the interval the dashboard resolved, rather than on its own default', function (): void {
+    // Delete `wire:poll` from the board, or `:poll-seconds` from the dashboard that mounts it, and
+    // every other test here stays green: the default is 5 either way. This is the assertion that
+    // #74's "within one polling interval" is delivered rather than merely defaulted to.
+    Livewire::test(TaskBoard::class)->assertSeeHtml('wire:poll.5s');
+
+    Livewire::test(TaskBoard::class, ['pollSeconds' => 30])->assertSeeHtml('wire:poll.30s');
+});
+
+it('offers the way back from a page past the end of the queue', function (): void {
+    // A queue that is an exact multiple of the page size used to render a Next button leading to an
+    // empty page whose only escape was the filter button that was already active.
+    $tasks = app(Tasks::class);
+
+    foreach (range(1, TaskBoard::PER_PAGE) as $n) {
+        $tasks->create($this->session, ['title' => sprintf('Task number %d', $n)], withCoordinator: false);
+    }
+
+    $board = Livewire::test(TaskBoard::class);
+
+    // Exactly one page, so there is nothing after it and nothing offering to go there
+    $board->assertDontSeeHtml('Next page');
+
+    $last = Task::query()->orderByDesc('id')->first();
+
+    $board->call('showNext', $last?->priority, $last?->id)
+        ->assertSee('past the end of the queue')
+        ->assertSeeHtml('First page');
+});
+
+it('survives a client unsetting the status filter', function (): void {
+    // Livewire answers `null` for a typed property by catching the TypeError and calling `unset()`,
+    // which leaves a non-nullable typed property uninitialized -- and the next read of it throws
+    // `must not be accessed before initialization`, uncaught, as a 500. Nullable, that path yields
+    // null and widens to every task.
+    app(Tasks::class)->create($this->session, ['title' => 'Still listed'], withCoordinator: false);
+
+    // `set()` with no value sends null, which is the case under test -- Rector rewrites the
+    // explicit `null` away, so the intent lives here rather than in the argument list.
+    Livewire::test(TaskBoard::class)
+        ->set('status')
+        ->assertOk()
+        ->assertSee('Still listed');
+});
+
+it('shows the queue through the gate, not only through the component harness', function (): void {
+    // `Livewire::test()` runs no HTTP middleware, so every case above passes with the `actingAs` in
+    // `beforeEach` deleted. This one goes through the route, and a stranger is refused by it.
+    app(Tasks::class)->create($this->session, ['title' => 'Visible to a developer'], withCoordinator: false);
+
+    $this->get(route('robot-council.dashboard'))->assertOk()->assertSee('Visible to a developer');
+
+    $stranger = $this->enrollDeveloper(9999, login: 'stranger');
+
+    $this->actingAs($stranger, 'web')
+        ->get(route('robot-council.dashboard'))
+        ->assertForbidden()
+        ->assertDontSee('Visible to a developer');
+});

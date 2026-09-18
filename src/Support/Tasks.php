@@ -98,7 +98,7 @@ final class Tasks
      * @param  bool  $asCoordinator  Whether the session holds `coordinator:direct`.
      * @param  AgentSession|null  $assignee  Who to hand it to, for a reassignment.
      * @param  array<array-key, mixed>|null  $result  What the agent reports, for a completion.
-     * @return TaskOutcome What came of it.
+     * @return Outcome What came of it.
      */
     public function transition(
         int $taskId,
@@ -107,7 +107,7 @@ final class Tasks
         bool $asCoordinator,
         ?AgentSession $assignee = null,
         ?array $result = null
-    ): TaskOutcome {
+    ): Outcome {
         $holder = $transition->takesTheClaim()
             ? ($assignee ?? $actor)
             : null;
@@ -119,7 +119,7 @@ final class Tasks
             throw new InvalidArgumentException('A reassignment needs the session to hand the task to.');
         }
 
-        return DB::transaction(function () use ($taskId, $transition, $actor, $asCoordinator, $holder, $result): TaskOutcome {
+        return DB::transaction(function () use ($taskId, $transition, $actor, $asCoordinator, $holder, $result): Outcome {
             // The session row before the task row, which is the package's lock order. A claim or a
             // reassign writes `claimed_by`, and on InnoDB that takes a shared lock on the new
             // parent -- after the task row, inverting the order against the release step. Taking it
@@ -127,7 +127,7 @@ final class Tasks
             // assignee is re-read under the lock, so a session that went between the two is
             // refused rather than handed a task it will never work.
             if ($holder instanceof AgentSession && ! $this->stillWorkable($holder)) {
-                return TaskOutcome::Conflict;
+                return Outcome::Conflict;
             }
 
             $changed = $this->write($taskId, $transition, $actor, $asCoordinator, $holder, $result);
@@ -148,7 +148,7 @@ final class Tasks
                 $asCoordinator
             );
 
-            return TaskOutcome::Applied;
+            return Outcome::Applied;
         });
     }
 
@@ -360,9 +360,9 @@ final class Tasks
      * @param  TaskTransition  $transition  What was attempted.
      * @param  AgentSession  $actor  The session that attempted it.
      * @param  bool  $asCoordinator  Whether the session holds `coordinator:direct`.
-     * @return TaskOutcome Why nothing happened.
+     * @return Outcome Why nothing happened.
      */
-    private function diagnose(int $taskId, TaskTransition $transition, AgentSession $actor, bool $asCoordinator): TaskOutcome
+    private function diagnose(int $taskId, TaskTransition $transition, AgentSession $actor, bool $asCoordinator): Outcome
     {
         // Locked, so the diagnosis reads the row the write tested rather than one that moved in
         // between. Postgres releases the lock on a row an UPDATE's predicate rejected and MySQL's
@@ -372,25 +372,25 @@ final class Tasks
         $task = Task::query()->whereKey($taskId)->lockForUpdate()->first();
 
         if (! $task instanceof Task) {
-            return TaskOutcome::NotFound;
+            return Outcome::NotFound;
         }
 
         if (! \in_array($task->status, $transition->startsFrom(), true)) {
-            return TaskOutcome::Conflict;
+            return Outcome::Conflict;
         }
 
         if ($transition === TaskTransition::Claim && ! $task->isClaimableBy($actor)) {
-            return TaskOutcome::Forbidden;
+            return Outcome::Forbidden;
         }
 
         $mustHold = $transition->needsTheClaim() && (! $asCoordinator || ! $transition->coordinatorMayOverride());
 
         if ($mustHold && $task->claimed_by !== $actor->getKey()) {
-            return TaskOutcome::Forbidden;
+            return Outcome::Forbidden;
         }
 
         // Everything the write tested still holds, so the row moved between the write and this
         // read. Whoever moved it got there first.
-        return TaskOutcome::Conflict;
+        return Outcome::Conflict;
     }
 }

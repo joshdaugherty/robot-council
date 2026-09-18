@@ -160,6 +160,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Locks
+    |--------------------------------------------------------------------------
+    |
+    | Named advisory leases. A lock expires on its own, so a session that
+    | stopped answering cannot block the fleet past its lease, and a fence
+    | value lets whatever the lock guards notice that the lease lapsed.
+    |
+    | `max_hold_seconds` is the ceiling a renewal cannot push a lease past,
+    | measured from when it was first acquired, so a session cannot hold one
+    | name forever by renewing. `max_per_session` bounds how many one session
+    | can hold at once.
+    |
+    */
+
+    'locks' => [
+        'max_ttl_seconds' => (int) env('ROBOT_COUNCIL_LOCKS_MAX_TTL_SECONDS', 900),
+        'max_hold_seconds' => (int) env('ROBOT_COUNCIL_LOCKS_MAX_HOLD_SECONDS', 14400),
+        'max_per_session' => (int) env('ROBOT_COUNCIL_LOCKS_MAX_PER_SESSION', 20),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Schedule
     |--------------------------------------------------------------------------
     |

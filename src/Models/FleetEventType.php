@@ -95,6 +95,31 @@ enum FleetEventType: string
     case TaskCancelled = 'task.cancelled';
 
     /**
+     * A session took a free lock.
+     */
+    case LockAcquired = 'lock.acquired';
+
+    /**
+     * A session extended a lease it already held.
+     */
+    case LockRenewed = 'lock.renewed';
+
+    /**
+     * A session gave up a lock it held.
+     */
+    case LockReleased = 'lock.released';
+
+    /**
+     * A session took a lock whose lease had lapsed, from whoever held it.
+     */
+    case LockTakenOver = 'lock.taken_over';
+
+    /**
+     * A coordinator took a lock away from the session holding it.
+     */
+    case LockForceReleased = 'lock.force_released';
+
+    /**
      * Whether an event of this type is only visible to some readers.
      *
      * @return bool True for narration, which #29 restricts, and false for everything else.

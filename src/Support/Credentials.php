@@ -160,6 +160,39 @@ final class Credentials
     }
 
     /**
+     * The longest lease a lock may be given or renewed for.
+     *
+     * @return int The ceiling in seconds, at least one.
+     */
+    public function lockMaxTtlSeconds(): int
+    {
+        return $this->bounded('locks.max_ttl_seconds', 900);
+    }
+
+    /**
+     * The longest one session may hold one name, measured from when it first acquired it.
+     *
+     * Never shorter than a single lease, or the first renewal of a lock taken at the maximum TTL
+     * would be refused for exceeding a ceiling it was already at.
+     *
+     * @return int The ceiling in seconds.
+     */
+    public function lockMaxHoldSeconds(): int
+    {
+        return max($this->bounded('locks.max_hold_seconds', 14400), $this->lockMaxTtlSeconds());
+    }
+
+    /**
+     * How many locks one session may hold at once.
+     *
+     * @return int The ceiling, at least one.
+     */
+    public function locksPerSession(): int
+    {
+        return $this->bounded('locks.max_per_session', 20);
+    }
+
+    /**
      * How many attempts per minute one rate limit allows.
      *
      * @param  string  $key  The key under `robot-council.rate_limits`.

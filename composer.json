@@ -17,6 +17,7 @@
     "require": {
         "php": "^8.4",
         "illuminate/contracts": "^13.23.0",
+        "laravel/mcp": "^1.0",
         "laravel/sanctum": "^4.3.1",
         "laravel/socialite": "^5.31.0",
         "spatie/laravel-package-tools": "^1.93.2"

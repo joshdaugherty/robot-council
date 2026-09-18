@@ -9,6 +9,7 @@ use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use Laravel\Mcp\Server\McpServiceProvider;
 use Laravel\Sanctum\Sanctum;
 use Laravel\Sanctum\SanctumServiceProvider;
 use Laravel\Socialite\SocialiteServiceProvider;
@@ -19,10 +20,12 @@ use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\AgentSessionStatus;
 use RobotCouncil\Models\GithubIdentity;
 use RobotCouncil\Models\Installation;
+use RobotCouncil\Models\TaskTransition;
 use RobotCouncil\RobotCouncilServiceProvider;
 use RobotCouncil\Support\AgentSessions;
 use RobotCouncil\Support\Credentials;
 use RobotCouncil\Support\Installations;
+use RobotCouncil\Support\Tasks;
 use RuntimeException;
 
 use function Orchestra\Testbench\default_migration_path;
@@ -100,7 +103,11 @@ class TestCase extends Orchestra
     protected function getPackageProviders($app)
     {
         return [
-            // A host application discovers these through Composer; Testbench does not
+            // A host application discovers these through Composer; Testbench does not. The MCP
+            // provider is not optional decoration: it registers the callback that copies a tool
+            // call's arguments onto the `Request` a tool type-hints, so without it every tool runs
+            // with no arguments and answers a validation error.
+            McpServiceProvider::class,
             SocialiteServiceProvider::class,
             SanctumServiceProvider::class,
             RobotCouncilServiceProvider::class,
@@ -295,13 +302,16 @@ class TestCase extends Orchestra
      * Create an approved installation for a developer, as the device-code flow would.
      *
      * @param  User  $user  The developer who approved it.
-     * @param  list<string>  $abilities  The abilities its session tokens carry.
+     * @param  list<string>|null  $abilities  The abilities its session tokens carry; null for the usual pair.
      * @param  string  $machineLabel  The label the requester claimed.
      * @return Installation The saved installation.
      */
-    public function approveInstallation(User $user, array $abilities = [], string $machineLabel = 'workbench'): Installation
+    public function approveInstallation(User $user, ?array $abilities = null, string $machineLabel = 'workbench'): Installation
     {
-        $abilities = $abilities === [] ? [Ability::TasksCreate->value, Ability::EventsPost->value] : $abilities;
+        // `null` asks for the usual pair; `[]` asks for genuinely none. They were the same value
+        // until a test meaning the second silently got the first, and then read the ability it had
+        // been granted as a missing check in the code under test.
+        $abilities ??= [Ability::TasksCreate->value, Ability::EventsPost->value];
 
         return Installation::query()->create([
             'user_id' => $user->getKey(),
@@ -354,6 +364,30 @@ class TestCase extends Orchestra
             'Authorization' => 'Bearer '.$token,
             'Accept' => 'application/json',
         ];
+    }
+
+    /**
+     * A task this test's own session holds, for the surfaces that need one to act on.
+     *
+     * Created and claimed through the store rather than over HTTP, because the tests that want one
+     * are testing a different door, and a failure in the setup should not read as a failure in it.
+     *
+     * @param  string  $title  The task's title.
+     * @return int The task's ID.
+     */
+    public function createClaimedTask(string $title = 'Held'): int
+    {
+        $tasks = $this->app?->make(Tasks::class);
+
+        if (! $tasks instanceof Tasks) {
+            throw new RuntimeException('The application is not booted.');
+        }
+
+        $task = $tasks->create($this->session, ['title' => $title], withCoordinator: false);
+
+        $tasks->transition($task->id, TaskTransition::Claim, $this->session, asCoordinator: false);
+
+        return $task->id;
     }
 
     /**

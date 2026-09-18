@@ -379,3 +379,23 @@ it('answers 404 rather than a database error for a session id that is not a numb
         ->postJson(route('robot-council.sessions.renew', ['session' => 'not-a-number']))
         ->assertNotFound();
 });
+
+it('rate limits an unauthenticated flood, which needs the limiter declared ahead of the guard', function (string $route): void {
+    // `sortMiddleware()` reorders only middleware that are themselves in the framework's priority
+    // list, relative to each other. `ThrottleRequests` is in it and neither `EnsureAgentSession`
+    // nor `EnsureInstallation` is, so with one member present nothing moves and declaration order
+    // decides. Declared after the guard, the limiter never runs for a request the guard refuses --
+    // so a caller with no token at all costs a token lookup per request, unlimited, and both
+    // limiters' `ip:` fallbacks are unreachable.
+    config()->set('robot-council.rate_limits.sessions_per_installation', 2);
+    config()->set('robot-council.rate_limits.agent_per_session', 2);
+
+    for ($refused = 0; $refused < 2; $refused++) {
+        $this->machine('not-a-token')->postJson(route($route))->assertStatus(401);
+    }
+
+    $this->machine('not-a-token')->postJson(route($route))->assertStatus(429);
+})->with([
+    'a machine route behind the installation guard' => 'robot-council.sessions.start',
+    'a machine route behind the agent guard' => 'robot-council.agent.heartbeat',
+]);

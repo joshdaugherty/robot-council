@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
+use Laravel\Mcp\Facades\Mcp;
+use Laravel\Mcp\Server\Middleware\ReorderJsonAccept;
 use RobotCouncil\Access\Allowlist;
 use RobotCouncil\Access\ApiGuards;
 use RobotCouncil\Access\Guard;
@@ -24,6 +26,8 @@ use RobotCouncil\Console\RevokeAbilityCommand;
 use RobotCouncil\Console\RevokeInstallationCommand;
 use RobotCouncil\Console\RevokeSessionCommand;
 use RobotCouncil\Console\SweepSessionsCommand;
+use RobotCouncil\Http\Middleware\EnsureAgentSession;
+use RobotCouncil\Mcp\CouncilServer;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\Installation;
 use RobotCouncil\Support\Contracts\DrawsUserCodes;
@@ -261,6 +265,63 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
             ->prefix($apiPrefix)
             ->name('robot-council.')
             ->group(__DIR__.'/../routes/api.php');
+
+        $this->registerMcpServer($apiPrefix, $apiMiddleware);
+    }
+
+    /**
+     * Mount the MCP server beside the machine routes.
+     *
+     * Behind the same guard, principal middleware and rate limit as every other agent route. The
+     * agent middleware is what makes a tool call arrive as a session -- `Http\Principal` refuses to
+     * hand a tool anything otherwise, so a server mounted without it fails loudly rather than
+     * serving the fleet's tools to whoever asked.
+     *
+     * **Declared as a group rather than applied to the returned route**, because `Mcp::web()`
+     * registers three routes and returns only the POST one: it answers `GET` and `DELETE` on the
+     * same URI with a constant 405 to satisfy the transport specification. Middleware applied to the
+     * return value reaches POST alone, which leaves two unauthenticated, unthrottled endpoints a
+     * host inherits and cannot put its own perimeter in front of. A group covers all three.
+     *
+     * It also orders the pipeline the right way round. The group's middleware merges *ahead* of the
+     * transport's own, so the limiter and the guard run before `ValidateMcpHeaders` decodes the
+     * body, and an unauthenticated caller no longer costs the host a JSON parse of up to
+     * `post_max_size`.
+     *
+     * **`ReorderJsonAccept` is named here as well**, because that reordering has to happen before
+     * anything can refuse the request. The transport specification asks a client to accept both
+     * `application/json` and `text/event-stream` and does not fix their order, while
+     * `Request::wantsJson()` reads only the first acceptable type -- so a client listing
+     * `text/event-stream` first would take the guard's 401 and the limiter's 429 as an HTML error
+     * page. It is idempotent, so running again inside the transport's own stack costs nothing.
+     *
+     * What does move inward is `AddWwwAuthenticateHeader`, and it costs the `realm="mcp"` and
+     * `error="invalid_token"` detail on a guard 401. `Illuminate\Pipeline\Pipeline::carry()` wraps
+     * each pipe in its own try/catch and renders the exception where it was thrown, so that
+     * middleware did previously receive the guard's 401 as a response and decorate it. The refusal
+     * still carries `WWW-Authenticate: Bearer` from `UnauthorizedHttpException`, and no OAuth
+     * resource-metadata route exists for the fuller form to point at.
+     *
+     * `mcp:inspector` does not list this server while a host has cached its routes, because Laravel
+     * skips a package's route files then and this registration runs inside that same guard.
+     *
+     * @param  string  $prefix  The configured machine-route prefix.
+     * @param  array<int|string, mixed>  $middleware  The host's own machine middleware.
+     */
+    private function registerMcpServer(string $prefix, array $middleware): void
+    {
+        $uri = trim($prefix, '/').'/mcp';
+
+        // `$middleware` has already been reduced to usable strings by `routeMiddleware()`, so this
+        // route and the REST routes receive exactly the same list
+        Route::middleware([
+            ...array_values($middleware),
+            ReorderJsonAccept::class,
+            'throttle:'.self::AGENT_LIMITER,
+            EnsureAgentSession::class,
+        ])->group(function () use ($uri): void {
+            Mcp::web($uri, CouncilServer::class)->name('robot-council.mcp');
+        });
     }
 
     /**
@@ -296,13 +357,30 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
     {
         $value = $config->get('robot-council.routes.'.$key, $default);
 
-        if (\is_array($value)) {
-            return $value;
+        if (! \is_array($value)) {
+            Log::warning(sprintf('robot-council: `robot-council.routes.%s` must be an array; using the package default.', $key));
+
+            return $default;
         }
 
-        Log::warning(sprintf('robot-council: `robot-council.routes.%s` must be an array; using the package default.', $key));
+        // Every entry has to survive being cast to a string, because that is what the router does
+        // with it: `Route::middleware()` and `RouteRegistrar::attribute()` both force `(string)`
+        // over each one. A closure raises `Object of class Closure could not be converted to
+        // string` and an array raises a warning and stores the literal `Array`, and this runs
+        // inside `packageBooted()` -- so a host that put the wrong shape in its config would take
+        // down every request and every artisan command, including the `config:clear` that would
+        // undo it.
+        $usable = array_values(array_filter($value, \is_string(...)));
 
-        return $default;
+        if (\count($usable) !== \count($value)) {
+            Log::warning(sprintf(
+                'robot-council: `robot-council.routes.%s` must hold middleware names as strings; ignoring %d entry that is not one.',
+                $key,
+                \count($value) - \count($usable),
+            ));
+        }
+
+        return $usable;
     }
 
     /**
@@ -348,8 +426,8 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
         });
 
         RateLimiter::for(self::AGENT_LIMITER, static function (Request $request) use ($credentials): Limit {
-            // Resolved through the guard for the reason the sessions limiter records: the router
-            // sorts `ThrottleRequests` ahead of any middleware outside its priority list
+            // Resolved through the guard for the reason the sessions limiter records: the limiter
+            // runs ahead of the guard middleware, so nothing has been left on the request yet
             $session = $request->user(ApiGuards::AGENT);
 
             $subject = $session instanceof AgentSession
@@ -367,10 +445,10 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
 
         RateLimiter::for(self::SESSIONS_LIMITER, static function (Request $request) use ($credentials): Limit {
             // Resolved through the guard rather than read from what `EnsureInstallation` leaves on
-            // the request. `ThrottleRequests` is in the framework's middleware priority list and
-            // this middleware is not, so the router sorts the limiter ahead of it whatever order
-            // the route declares, and the request attribute is not set yet. Keyed on the address
-            // when no installation resolves, which is what an unauthenticated flood looks like.
+            // the request: the routes declare this limiter ahead of that middleware, so the request
+            // attribute is not set yet. Keyed on the address when no installation resolves, which
+            // is what an unauthenticated flood looks like -- and what the route order makes
+            // reachable, because a limiter declared after the guard never sees one.
             $installation = $request->user(ApiGuards::INSTALLATION);
 
             $subject = $installation instanceof Installation

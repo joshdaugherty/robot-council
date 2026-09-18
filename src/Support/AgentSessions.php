@@ -66,14 +66,25 @@ final class AgentSessions
 
             // In the same transaction as the session it describes, so a failure here leaves
             // neither the session nor a feed entry claiming one exists
-            $this->events->record(
+            $enrolled = $this->events->record(
                 FleetEventType::SessionEnrolled,
                 $session,
                 sprintf('%s on %s started a session.', $current->harness, $current->machine_label),
                 ['installation_id' => $current->id, 'project_id' => $projectId]
             );
 
-            return new IssuedCredential($session, $this->issueToken($session, $abilities), $abilities);
+            // The enrollment event's own id is the cursor this session starts from, and it needs no
+            // separate read of the feed's head. `FleetEvents::record()` holds the sentinel row lock
+            // while it inserts, and that lock is transaction-scoped -- so every id below this one
+            // belonged to a writer that held the lock before us and therefore committed before us.
+            // A `MAX(id)` taken outside that lock could observe 6 committed while 5 was still in
+            // flight, and a reader paging `id > cursor` would pass 6 and never see 5 again.
+            return new IssuedCredential(
+                $session,
+                $this->issueToken($session, $abilities),
+                $abilities,
+                $enrolled->id,
+            );
         });
     }
 
@@ -103,7 +114,15 @@ final class AgentSessions
 
             $session->tokens()->delete();
 
-            return new IssuedCredential($session, $this->issueToken($session, $abilities), $abilities);
+            // No cursor, which is what the omitted fourth argument means. A renewal does not move
+            // where the session reads: the helper keeps the position it had, and handing back a
+            // fresh one here would replay everything since the session started or skip everything
+            // it had not yet read, depending on which way the position moved.
+            return new IssuedCredential(
+                $session,
+                $this->issueToken($session, $abilities),
+                $abilities,
+            );
         });
     }
 

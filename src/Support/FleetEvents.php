@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\FleetEvent;
 use RobotCouncil\Models\FleetEventType;
+use RuntimeException;
 
 /**
  * Writes the fleet's change feed.
@@ -92,9 +93,26 @@ final class FleetEvents
      *
      * SQLite compiles `for update` to nothing, which is correct rather than a gap: it takes a
      * write lock for the whole transaction on its own.
+     *
+     * **A missing sentinel row is fatal rather than ignored.** `first()` on a row that is not there
+     * returns null and locks nothing, and the insert below would then go ahead unordered -- so a
+     * host that truncated this table, or restored it without its one row, would get a feed whose
+     * ordering had silently stopped holding. That was one skippable event before a session's
+     * starting cursor was derived from this lock; now it is every fresh session's watermark.
+     *
+     * @throws RuntimeException When the sentinel row is missing, because the alternative is writing
+     *                          a feed whose order nothing guarantees.
      */
     private function holdTheFeed(): void
     {
-        DB::table(self::LOCK_TABLE)->where('id', self::LOCK_ROW)->lockForUpdate()->first();
+        $held = DB::table(self::LOCK_TABLE)->where('id', self::LOCK_ROW)->lockForUpdate()->first();
+
+        if ($held === null) {
+            throw new RuntimeException(sprintf(
+                'robot-council: the feed lock row %s.%d is missing, so event ordering cannot be guaranteed. Re-run the package migrations.',
+                self::LOCK_TABLE,
+                self::LOCK_ROW
+            ));
+        }
     }
 }

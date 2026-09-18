@@ -22,10 +22,20 @@ final class IssuedCredential
      * @param  TOwner  $owner  The installation or agent session the token authenticates as.
      * @param  string  $plainTextToken  The bearer token, returned once and never again.
      * @param  list<string>  $abilities  What this token carries, as it was minted.
+     * @param  int|null  $feedCursor  Where this principal begins reading the feed, where that means
+     *                                anything. Null for an installation credential, which reads no
+     *                                feed, and for a renewal, which must not move a position the
+     *                                session already holds. For a session being started it is the id
+     *                                of that session's own enrollment event, so everything at or
+     *                                below it is history the session did not ask for and everything
+     *                                above it happened after the session existed. A consequence
+     *                                worth knowing: paging is `id > cursor`, so a session never sees
+     *                                its own enrollment event, while every other session does.
      */
     public function __construct(
         public readonly Model $owner,
         public readonly string $plainTextToken,
-        public readonly array $abilities
+        public readonly array $abilities,
+        public readonly ?int $feedCursor = null
     ) {}
 }

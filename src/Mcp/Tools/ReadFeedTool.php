@@ -57,7 +57,12 @@ final class ReadFeedTool extends Tool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'after' => $schema->integer()->description('The last event id you have seen. 0 for the beginning.'),
+            'after' => $schema->integer()->description(
+                'The last event id you have seen. Your first call uses the `feed_cursor` your '
+                .'session was started with, which is where the feed stood at that moment; after '
+                .'that, use the `cursor` the previous page returned. 0 means the entire history '
+                ."back to the fleet's first event, which on a busy fleet is a great many pages."
+            ),
             'limit' => $schema->integer()->description(sprintf('How many to examine, up to %d.', FleetFeed::MAX_PAGE)),
         ];
     }

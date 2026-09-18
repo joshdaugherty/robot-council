@@ -37,18 +37,22 @@ return new class extends Migration
         Schema::create('robot_council_events', function (Blueprint $table): void {
             $table->id();
 
-            // Null for an event the service recorded rather than a session
-            // Indexed explicitly. `constrained()` emits a foreign key and no index, and only
-            // MySQL creates one for the constraint server-side -- so on Postgres and SQLite both
-            // the feed's visibility filter and this constraint's own delete cascade would be
-            // full-table scans.
+            // Null for an event the service recorded rather than a session.
+            //
+            // The index this column needs is the composite declared at the foot of this table, not
+            // a single-column one. `constrained()` emits a foreign key and no index, and only MySQL
+            // creates one server-side, so without something here this constraint's own delete
+            // cascade would be a full-table scan on Postgres and SQLite. A leftmost prefix serves
+            // that, and serves MySQL's requirement that a foreign-key column be indexed, so a
+            // standalone index beside the composite would be write cost on the hot append path for
+            // a query neither engine would choose it for.
             $table->foreignId('agent_session_id')
                 ->nullable()
-                ->index()
                 ->constrained('robot_council_agent_sessions')
                 ->nullOnDelete();
 
-            $table->string('type', 64)->index();
+            // Likewise carried by `(type, id)` below rather than an index of its own
+            $table->string('type', 64);
 
             // What a human reads. Narration and directives carry one; a state change may not.
             $table->text('body')->nullable();
@@ -65,6 +69,27 @@ return new class extends Migration
             // on it: the feed is read by ID cursor and never by time, so an index here would be
             // write cost on the hot append path and nothing would read it.
             $table->timestamp('created_at')->nullable();
+
+            // The two branches a reader's visibility is decided on, each with `id` beside it so a
+            // branch can be walked in feed order without a sort. #48 decided these ship now.
+            //
+            // **No query in this package can use them today, and that is deliberate.**
+            // `FleetFeed::after()` reads in two phases: a primary-key range scan picks a window of
+            // at most `MAX_PAGE` ids, then the visibility filter runs as a residual predicate over
+            // `whereKey($window)`. The filter never drives an access path, because the row set is
+            // already pinned by the primary key -- measured with `EXPLAIN QUERY PLAN` on a seeded
+            // SQLite fixture, where all four of the package's queries plan identically with these
+            // indexes present and absent. What they are provisioned for is the `UNION ALL` of two
+            // index-backed branches that robot-council/core#62 may adopt, which is why #62 lists
+            // "neither" among its candidates. Until it decides, this is write cost paid forward.
+            //
+            // `posted_with_coordinator` gets none, and not because it is unselective: it is written
+            // `true` in one place only, so it is rare rather than half, which is the distribution a
+            // partial index suits. It stays a filter because it reaches the query only as one
+            // disjunct of an `OR` over a window already pinned by primary key, where no index on it
+            // could be reached at all.
+            $table->index(['agent_session_id', 'id']);
+            $table->index(['type', 'id']);
         });
     }
 

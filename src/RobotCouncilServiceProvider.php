@@ -29,6 +29,7 @@ use RobotCouncil\Models\Installation;
 use RobotCouncil\Support\Contracts\DrawsUserCodes;
 use RobotCouncil\Support\Credentials;
 use RobotCouncil\Support\HostUsers;
+use RobotCouncil\Support\Locks;
 use RobotCouncil\Support\SessionReleases;
 use RobotCouncil\Support\Tasks;
 use RobotCouncil\Support\UserCodes;
@@ -171,8 +172,16 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
      */
     private function registerReleases(): void
     {
-        $this->app->make(SessionReleases::class)->register(function (): void {
+        $releases = $this->app->make(SessionReleases::class);
+
+        $releases->register(function (): void {
             $this->app->make(Tasks::class)->releaseOrphaned();
+        });
+
+        // A second step beside the first. Every step runs even when one throws, so a task release
+        // that fails cannot leave the locks of every gone session held.
+        $releases->register(function (): void {
+            $this->app->make(Locks::class)->releaseOrphaned();
         });
     }
 

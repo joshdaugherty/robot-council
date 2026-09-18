@@ -13,8 +13,8 @@ use RobotCouncil\Http\Principal;
 use RobotCouncil\Http\Rules\BoundedMeta;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\TaskTransition;
+use RobotCouncil\Support\Outcome;
 use RobotCouncil\Support\TaskList;
-use RobotCouncil\Support\TaskOutcome;
 use RobotCouncil\Support\Tasks;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
@@ -74,8 +74,8 @@ final class TransitionTaskController
 
         return new JsonResponse([
             'task_id' => (int) $task,
-            'status' => $outcome === TaskOutcome::Applied ? $move->to()->value : null,
-            'applied' => $outcome === TaskOutcome::Applied,
+            'status' => $outcome === Outcome::Applied ? $move->to()->value : null,
+            'applied' => $outcome === Outcome::Applied,
         ], $outcome->status());
     }
 

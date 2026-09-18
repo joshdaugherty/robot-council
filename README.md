@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/robot-council/core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/robot-council/core/actions/workflows/ci.yml?query=branch%3Amain)
 
-The core package of Robot Council, a coordination service for fleets of AI coding agents. It is installed into a host Laravel application, which it gives GitHub sign-in restricted to an allowlist of GitHub accounts, and agent enrollment through the device-code flow, agent-session presence, task claims, and the fleet's change feed. The rest of the service — named locks — is designed in [issue #14](https://github.com/robot-council/core/issues/14) and not built yet.
+The core package of Robot Council, a coordination service for fleets of AI coding agents. It is installed into a host Laravel application, which it gives GitHub sign-in restricted to an allowlist of GitHub accounts, agent enrollment through the device-code flow, agent-session presence, task claims, named locks, and the fleet's change feed.
 
 ## Requirements
 
@@ -14,7 +14,7 @@ The core package of Robot Council, a coordination service for fleets of AI codin
   `'007'` and `'7'` are different developers.
 - A `users` table that accepts a row carrying only `name` and `email`. `robot-council:install`
   relaxes the two columns Laravel's own skeleton makes `NOT NULL`; another `NOT NULL` column with no
-  default fails the first sign-in ([#36](https://github.com/robot-council/core/issues/36)).
+  default fails the first sign-in.
 
 ## Installation
 
@@ -168,14 +168,44 @@ status, priority, project, provenance — reaches everyone, because a queue half
 is a queue that deadlocks. The `title`, `description`, `payload` and `result` reach only the readers
 who may act on the task: its own developer's sessions, anyone at all when a coordinator filed it,
 and any session holding `coordinator:direct`. Everyone else gets `null` in those fields and
-`readable: false`. That is the same boundary #29 draws for narration, and for the same reason — a
-task's description is instructions, and task content is untrusted input to an agent that may have
-shell access.
+`readable: false`. That is the same boundary the change feed draws for narration, and for the same
+reason — a task's description is instructions, and task content is untrusted input to an agent that
+may have shell access.
 
 **A session that goes `gone` gives its tasks back.** The presence sweep releases everything a gone
 session still held, and it runs on every sweep rather than on a signal, so a release that was missed
 costs one sweep interval rather than leaving a task claimed by a process that no longer exists. A
 `stale` session keeps its tasks: it has been quiet, not stopped.
+
+## Locks
+
+Named advisory leases, for anything narrower than a task — one session pushing to a branch at a
+time. All three take the name in the **body**, never in the path: a Laravel route parameter does not
+match `/`, and `branch:feature/foo` is exactly the kind of name worth locking.
+
+- `POST {prefix}/api/locks/acquire` — take a free name, or one whose lease has lapsed
+- `POST {prefix}/api/locks/renew` — extend a lease this session holds
+- `POST {prefix}/api/locks/release` — give it up
+- `POST {prefix}/api/locks/force-release` — take one away, needing `coordinator:direct`
+
+The first three need `locks:acquire`. Acquire and renew take a `ttl` in seconds, up to
+`locks.max_ttl_seconds`; a renewal cannot push a hold past `locks.max_hold_seconds` from when it was
+first acquired, and a session holds at most `locks.max_per_session` at once.
+
+**Advisory means nothing here enforces what a lock guards**, so a lease that lapses cannot stop the
+session that held it from carrying on. The `fence` is what makes that safe:
+
+```json
+{ "name": "branch:feature/foo", "held": true, "fence": 7, "expires_at": "…", "expires_in": 900 }
+```
+
+Carry the fence into whatever the lock guards, and have that thing refuse anything below the highest
+fence it has seen. **The fence only ever climbs for a name** — across a takeover, and across a
+release, because a released lock keeps its row. A renewal keeps the same fence, because it is the
+same hold continuing.
+
+A lease expires on its own, so a session that stopped answering blocks the fleet for at most its
+TTL. When a session goes `gone`, the presence sweep releases everything it still held.
 
 ## Presence
 

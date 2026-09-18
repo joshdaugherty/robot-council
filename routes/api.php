@@ -24,6 +24,7 @@ use RobotCouncil\Http\Controllers\DeviceCodeController;
 use RobotCouncil\Http\Controllers\DeviceTokenController;
 use RobotCouncil\Http\Controllers\FleetFeedController;
 use RobotCouncil\Http\Controllers\ListTasksController;
+use RobotCouncil\Http\Controllers\LockController;
 use RobotCouncil\Http\Controllers\PostDirectiveController;
 use RobotCouncil\Http\Controllers\PostNarrationController;
 use RobotCouncil\Http\Controllers\SessionEndController;
@@ -33,6 +34,7 @@ use RobotCouncil\Http\Controllers\TransitionTaskController;
 use RobotCouncil\Http\Middleware\EnsureAgentSession;
 use RobotCouncil\Http\Middleware\EnsureInstallation;
 use RobotCouncil\Http\Middleware\RequireAbility;
+use RobotCouncil\Models\LockAction;
 use RobotCouncil\Models\TaskTransition;
 use RobotCouncil\RobotCouncilServiceProvider;
 
@@ -99,6 +101,14 @@ Route::middleware([EnsureAgentSession::class, 'throttle:'.RobotCouncilServicePro
         // unknown one is a 404 from the router. The ability each needs is on `TaskTransition` and
         // checked in the controller rather than declared here: `release` is allowed to the session
         // holding the task *or* to a coordinator, and no single ability names that.
+        // The lock's name is in the body, never in the path: a route parameter does not match `/`,
+        // and `branch:feature/foo` is exactly the kind of name worth locking. The ability each
+        // action needs is on `LockAction` -- `force-release` needs the coordinator's, the rest need
+        // `locks:acquire` -- and is checked in the controller so the two cannot drift apart.
+        Route::post('locks/{action}', LockController::class)
+            ->where('action', implode('|', LockAction::values()))
+            ->name('locks.action');
+
         Route::post('tasks/{task}/{transition}', TransitionTaskController::class)
             ->where('task', RobotCouncilServiceProvider::ROUTE_ID)
             ->where('transition', implode('|', TaskTransition::values()))

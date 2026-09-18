@@ -26,9 +26,9 @@ use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Models\Task;
 use RobotCouncil\Models\TaskStatus;
 use RobotCouncil\Models\TaskTransition;
+use RobotCouncil\Support\Outcome;
 use RobotCouncil\Support\SessionPresence;
 use RobotCouncil\Support\TaskList;
-use RobotCouncil\Support\TaskOutcome;
 use RobotCouncil\Support\Tasks;
 use RobotCouncil\Tests\TestCase;
 
@@ -376,7 +376,7 @@ it('gives one task to exactly one of two agents claiming it at once', function (
     // make, and a mutant that answered `NotFound` here would otherwise pass.
     $mine->assertOk();
 
-    expect($rivalOutcome)->toBe(TaskOutcome::Conflict)
+    expect($rivalOutcome)->toBe(Outcome::Conflict)
         ->and(FleetEvent::query()->where('type', FleetEventType::TaskClaimed->value)->count())->toBe(1)
         ->and($held->status)->toBe(TaskStatus::Claimed)
         ->and($held->claimed_by)->toBe($this->session->getKey());
@@ -424,7 +424,7 @@ it('settles a release racing a reassignment on exactly one outcome', function ()
     // assertion has teeth -- against a read-then-check-the-claimant implementation, both apply.
     $release->assertOk();
 
-    expect($reassigned)->toBe(TaskOutcome::Conflict)
+    expect($reassigned)->toBe(Outcome::Conflict)
         ->and($final->status)->toBe(TaskStatus::Pending)
         ->and($final->claimed_by)->toBeNull()
         ->and($assignee->getKey())->not->toBeNull();

@@ -160,6 +160,42 @@ final class Credentials
     }
 
     /**
+     * The longest lease a lock may be given or renewed for.
+     *
+     * Never longer than the hold ceiling. A host that configured a lease longer than the total
+     * hold would otherwise advertise a maximum in the 422 that the 409 then refuses: a lock taken
+     * at that lease could never be renewed, because the first renewal already exceeds the ceiling.
+     * The lease comes down rather than the ceiling going up, so `max_hold_seconds` keeps meaning
+     * what it says and the number the API advertises is one it will actually accept.
+     *
+     * @return int The ceiling in seconds, at least one.
+     */
+    public function lockMaxTtlSeconds(): int
+    {
+        return min($this->bounded('locks.max_ttl_seconds', 900), $this->lockMaxHoldSeconds());
+    }
+
+    /**
+     * The longest one session may hold one name, measured from when it first acquired it.
+     *
+     * @return int The ceiling in seconds, at least one.
+     */
+    public function lockMaxHoldSeconds(): int
+    {
+        return $this->bounded('locks.max_hold_seconds', 14400);
+    }
+
+    /**
+     * How many locks one session may hold at once.
+     *
+     * @return int The ceiling, at least one.
+     */
+    public function locksPerSession(): int
+    {
+        return $this->bounded('locks.max_per_session', 20);
+    }
+
+    /**
      * How many attempts per minute one rate limit allows.
      *
      * @param  string  $key  The key under `robot-council.rate_limits`.

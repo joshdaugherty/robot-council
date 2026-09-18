@@ -70,6 +70,12 @@ final class FleetEvents
 
             $event = FleetEvent::query()->create([
                 'agent_session_id' => $session?->getKey(),
+
+                // Read off the session now, not looked up from the id later. There is no foreign
+                // key on `agent_session_id` (#50), so a session row can go and its id can be taken
+                // by a different developer's session -- and #29's visibility rule must not follow
+                // it there.
+                'user_id' => $session?->user_id,
                 'type' => $type,
                 'body' => $body,
                 'meta' => $meta === [] ? null : $meta,

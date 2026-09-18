@@ -37,10 +37,26 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
   order. Two paths taking the same two rows in opposite orders deadlock on every engine that locks
   rows, which is all of them but SQLite -- and SQLite serializes writers, so no test in this suite can
   show it. `AgentSessions::renew()` and `Installations::revoke()` both had to be reordered for this.
-  The one ordering still inverted is MySQL's foreign-key check on `robot_council_events`, which takes
-  a shared lock on the parent session row while the sentinel is held; that is an open fork.
+  **`robot_council_events` takes no session lock at all**, because #50 dropped the foreign key on
+  `agent_session_id` rather than maintain an order every future author has to remember: on InnoDB the
+  child insert takes a shared lock on the parent while the sentinel is already held, inverting the
+  order the presence sweep takes the same two rows in, and the lock is implicit so nothing in the
+  code says it is being taken. `robot_council_tasks` keeps its foreign keys, because its write rate
+  is low and `Support\Tasks::transition()` already takes the session row explicitly and first -- the
+  order is visible there rather than inherited.
 - **Whatever is displayed to agents is charset-limited at the edge.** `harness`, `machine_label`, and `project_id` all reach other developers' agents, and event content is untrusted input to something that may have shell access. `meta` is bounded by `Http\Rules\BoundedMeta` for the same reason an `array` rule bounds nothing.
 - **Who sees which event is decided in `Support\FleetFeed`, and it is a security boundary.** Narration reaches only its own developer's sessions and sessions that held `coordinator:direct` when they posted; state changes and directives reach everyone. Whether the ability was held is recorded on the event at write time, so revoking it later is not retroactive.
+- **Both halves of that rule are read from the event, never looked up from its session id.**
+  `robot_council_events` carries `user_id`, denormalized at write time exactly as
+  `robot_council_tasks.user_id` is. There is no foreign key on `agent_session_id` (#50), so nothing
+  nulls it when a session row goes, and **session ids are reused**: Laravel's SQLite
+  `compileTruncate` issues `delete from sqlite_sequence` beside the row delete, after which the next
+  session takes id 1 again -- measured -- and Postgres's is `truncate ... restart identity`. A filter
+  asking `agent_session_id IN (the reader's live sessions)` therefore re-points a dead session's
+  narration at whoever holds its id now, and `AgentLogins` keyed by session id stamps that other
+  developer's login onto it. Verified by planting both forms: each serves one developer another
+  developer's restricted narration. `AgentLogins::forUsers()` exists for this; `forSessions()` is
+  for callers reading live sessions, which is presence and tasks.
 - **Nothing reads from Slack, and a test enforces it.** The package's only outbound HTTP call is one POST in `Jobs\MirrorEventToSlack`. A read would let a coordination decision depend on Slack being up and honest.
 - **Read what Rector does to a queued job.** It renamed a private `retryAfter()` helper to `backoff()`, which is a framework hook, so `Illuminate\Queue\Queue` began calling it with a signature it does not have; it also rewrote `public int $tries` into `#[Tries(5)]`. Neither is announced. Do not name anything on a job `retryAfter` or `backoff`.
 - **A schema change edits the create migration rather than adding one, and that is only safe while nothing shipped carries it.** Six migration files and zero `_add_*_to_*` ones: `4b1fdda` rewrote `last_seen_at` inside the agent-sessions create migration for #24, and `6afeb05` edited two more. The condition is that `v0.1.0` contains no `database/` directory at all (`git ls-tree -r --name-only v0.1.0 -- database/` is empty), so no host can have run any of them from a release. The first host installing from `dev-main` makes this false, silently.
@@ -92,6 +108,20 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
   library's dependency resolution, which CI should re-resolve, and the second is a build toolchain,
   whose drift would change the bytes a consumer receives. A CI check that the artifact matches its
   sources is #66.
+- **SQLite enforces no foreign key in this suite, so no test can observe one unless it says so.**
+  Testbench's `Bootstrap\LoadConfiguration` sets `foreign_key_constraints` to `Env::get('DB_FOREIGN_KEYS', false)`,
+  where Laravel's own skeleton config defaults the same key to `true`. Measured: `pragma foreign_keys`
+  reads **0** on the default `testing` connection. So a cascade, a `nullOnDelete`, or a constraint
+  violation is inert locally and enforced only in CI's `postgres` job -- and a test written to pin
+  any of them passes identically whether the constraint is declared or not. Found while dropping the
+  events table's foreign key for #59: the test written to show that a dangling session id survives a
+  delete passed with the constraint put back, which made it a description of nothing. A test that
+  genuinely depends on a constraint being enforced issues `DB::statement('pragma foreign_keys = ON')`
+  and asserts it read back 1, rather than assuming the engine agrees -- **guarded on
+  `DB::connection()->getDriverName() === 'sqlite'`**, because `pragma` is SQLite's alone and the
+  `postgres` job runs the same files. Better still, write the test so it does not depend on
+  enforcement at all: the one that shipped forces the state it is about rather than asking the engine
+  to produce it.
 - **SQLite does not enforce a `varchar` length and Postgres does**, so a fixture that writes an
   overlong value passes every local run and fails only in the `postgres` job. `$table->string('x', 32)`
   is a hard limit there: Postgres answers `SQLSTATE[22001] value too long for type character

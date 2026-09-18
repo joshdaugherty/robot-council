@@ -52,6 +52,12 @@ final class SessionStartController
             // A duration rather than an instant, so a helper on a machine whose clock is off still
             // renews in time
             'expires_in' => $credentials->sessionTtlMinutes() * 60,
+
+            // Where to begin reading the change feed. A fresh session starting from zero would walk
+            // the whole table to reach the present -- history nobody asked for, bounded only by the
+            // rate limit. A helper that does want history sends a lower cursor, and zero still
+            // means everything.
+            'feed_cursor' => $issued->feedCursor,
         ], Response::HTTP_CREATED);
     }
 }

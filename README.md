@@ -93,7 +93,9 @@ displays a short code, and the developer types it into a page while signed in.
 Every response that carries a bearer token names it `token`, every expiry is an `expires_in` in
 seconds, and `abilities` always describes the token beside it. Where a response also names
 `granted_abilities`, that is what a *different* token will carry -- the sessions an installation
-credential will start.
+credential will start. Starting a session also names a `feed_cursor`, which is where the change feed
+stood at that moment; a renewal does not, because it must not move a position the process already
+holds.
 
 **This flow is device-code shaped, not [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)
 conformant**, and the differences are deliberate:
@@ -326,6 +328,14 @@ login, and whether the coordinator's ability was held — never anything the pos
 **The cursor is how far the feed was read, not the last row returned.** A page is a window of IDs,
 so it can come back short or empty when the visibility rule hides everything in that window, and the
 cursor still moves. Do not treat an empty page as "caught up" — compare the cursor instead.
+
+**Where the first cursor comes from.** Starting a session returns a `feed_cursor`, which is where the
+feed stood as that session began. Read from it and the first page is current events; read from `0`
+and the first page is the fleet's oldest, which on a long-lived feed is a great many pages to walk
+before reaching the present. Either is allowed — a process that wants the history asks for it by
+sending a lower number. **Keep the cursor.** A renewal does not restate it and no endpoint hands it
+back, so a process that loses it chooses between replaying the feed from `0` and starting a new
+session.
 
 ### Mirroring to Slack
 

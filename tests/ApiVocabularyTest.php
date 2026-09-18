@@ -197,3 +197,23 @@ it('keeps the RFC 8628 error vocabulary, which is the half that is conformant', 
         'code_verifier' => $enrollment['verifier'],
     ])->assertStatus(400)->assertExactJson(['error' => 'authorization_pending']);
 });
+
+it('names the feed position `feed_cursor`, and only where starting one means something', function (): void {
+    $responses = everyMachineResponse($this, $this->developer);
+
+    // A session being started is told where to begin reading, so it reaches current events in one
+    // request instead of walking the whole feed to reach the present
+    expect($responses['sessions'])->toHaveKey('feed_cursor')
+        ->and($responses['sessions']['feed_cursor'])->toBeInt()
+        ->and($responses['sessions']['feed_cursor'])->toBeGreaterThan(0);
+
+    // A renewal states no position at all rather than restating one. The helper keeps where it had
+    // read to, and a fresh cursor here would either replay everything since the session started or
+    // skip everything it had not yet read, depending on which way the position moved. Absent rather
+    // than null, because a key that is always null is a key a client learns to send back.
+    expect($responses['sessions/renew'])->not->toHaveKey('feed_cursor');
+
+    // An installation credential reads no feed, so it names no position in it
+    expect($responses['device/token'])->not->toHaveKey('feed_cursor')
+        ->and($responses['device/code'])->not->toHaveKey('feed_cursor');
+});

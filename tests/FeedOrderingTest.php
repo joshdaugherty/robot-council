@@ -151,3 +151,37 @@ it('writes again as soon as the other connection lets go', function (): void {
         DB::purge("{$default}_other");
     }
 })->group('cross-connection');
+
+it('refuses to write the feed when the sentinel row it orders by is missing', function (): void {
+    $this->migrateUsersTableWithPackageColumns();
+
+    // Not in the `cross-connection` group: this is about the lock being TAKEN, which one connection
+    // can show, rather than about what it excludes, which needs two.
+    //
+    // `first()` on a row that is not there returns null and locks nothing, so without this guard a
+    // host that truncated `robot_council_feed_lock` -- or restored it without its one row -- would
+    // keep writing a feed whose ordering had silently stopped holding. Nothing at runtime tells the
+    // two states apart, which is why it has to be loud here.
+    DB::table(FleetEvents::LOCK_TABLE)->where('id', FleetEvents::LOCK_ROW)->delete();
+
+    expect(fn (): FleetEvent => $this->service(FleetEvents::class)
+        ->record(FleetEventType::Directive, null, 'Written with no lock to take.'))
+        ->toThrow(RuntimeException::class);
+
+    // And it refused rather than merely complaining: nothing reached the table
+    expect(FleetEvent::query()->count())->toBe(0);
+});
+
+it('writes the feed when the sentinel row is present', function (): void {
+    $this->migrateUsersTableWithPackageColumns();
+
+    // The control for the test above. Same call, same fixture, one row different -- so the refusal
+    // there is the missing sentinel and not something else about recording a directive.
+    expect(DB::table(FleetEvents::LOCK_TABLE)->where('id', FleetEvents::LOCK_ROW)->count())->toBe(1);
+
+    $event = $this->service(FleetEvents::class)
+        ->record(FleetEventType::Directive, null, 'Written with the lock held.');
+
+    expect($event->id)->toBeGreaterThan(0)
+        ->and(FleetEvent::query()->count())->toBe(1);
+});

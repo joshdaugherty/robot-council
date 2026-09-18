@@ -14,10 +14,12 @@ declare(strict_types=1);
 
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schema;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\FleetEvent;
 use RobotCouncil\Models\FleetEventType;
+use RobotCouncil\Support\FleetEvents;
 use RobotCouncil\Tests\TestCase;
 
 beforeEach(function (): void {
@@ -435,4 +437,123 @@ it('asks the enum which types are restricted', function (): void {
         ->and(FleetEventType::Narration->isRestricted())->toBeTrue()
         ->and(FleetEventType::Directive->isRestricted())->toBeFalse()
         ->and(FleetEventType::SessionEnrolled->isRestricted())->toBeFalse();
+});
+
+it('starts a session at the head of the feed, so it reaches current events in one request', function (): void {
+    // A fresh session beginning at zero walks the whole table to reach the present -- history
+    // nobody asked for, bounded only by the rate limit. #48 measured it: `MAX_PAGE` is 200 and the
+    // agent limit is 120 a minute, so a million-event feed is about 42 minutes of doing nothing else.
+    [$mine] = sessionFor($this, $this->mine, [Ability::EventsPost->value]);
+
+    $events = $this->service(FleetEvents::class);
+
+    foreach (range(1, 5) as $n) {
+        $events->record(FleetEventType::Narration, $mine, sprintf('Old %03d', $n));
+    }
+
+    $installation = $this->approveInstallation($this->mine, [Ability::EventsPost->value], machineLabel: 'fresh');
+
+    $started = $this->machine($this->installationCredential($installation))
+        ->postJson(route('robot-council.sessions.start'));
+
+    $started->assertCreated();
+
+    $cursor = intValue($started->json('feed_cursor'));
+
+    // Pinned to the enrolment row itself, not merely to "somewhere past the history". Asserting
+    // only that the old bodies are absent leaves the boundary loose: `$enrolled->id - 1` is 6 here,
+    // `id > 6` still excludes `Old 005`, and every absence assertion below still passes. The exact
+    // id is the claim, so the exact id is what is asserted.
+    $enrolled = FleetEvent::query()
+        ->where('type', FleetEventType::SessionEnrolled->value)
+        ->where('agent_session_id', intValue($started->json('session_id')))
+        ->sole();
+
+    expect($cursor)->toBe($enrolled->id);
+
+    $events->record(FleetEventType::Directive, null, 'Posted after the session started.');
+
+    $read = $this->machine(stringValue($started->json('token')))
+        ->getJson(route('robot-council.events.index', ['after' => $cursor]));
+
+    $bodies = array_column(arrayValue($read->json('events')), 'body');
+
+    // One request reaches the new event, and none of the history comes with it
+    expect($bodies)->toContain('Posted after the session started.')
+        ->and($bodies)->not->toContain('Old 001')
+        ->and($bodies)->not->toContain('Old 005');
+});
+
+it('makes the starting cursor a default rather than a restriction', function (): void {
+    [$mine] = sessionFor($this, $this->mine, [Ability::EventsPost->value]);
+
+    $this->service(FleetEvents::class)->record(FleetEventType::Narration, $mine, 'Older than the session.');
+
+    $installation = $this->approveInstallation($this->mine, [Ability::EventsPost->value], machineLabel: 'fresh');
+
+    $started = $this->machine($this->installationCredential($installation))
+        ->postJson(route('robot-council.sessions.start'));
+
+    $token = stringValue($started->json('token'));
+
+    // Both halves in one test, because each is the other's control: the same event, read by the
+    // same session, at the cursor it was handed and at zero. Read only at zero, the assertion says
+    // nothing about `feed_cursor` at all and would pass identically on the commit before this one.
+    $fromCursor = $this->machine($token)
+        ->getJson(route('robot-council.events.index', ['after' => intValue($started->json('feed_cursor'))]));
+
+    $fromZero = $this->machine($token)
+        ->getJson(route('robot-council.events.index', ['after' => 0]));
+
+    expect(array_column(arrayValue($fromCursor->json('events')), 'body'))->not->toContain('Older than the session.')
+        ->and(array_column(arrayValue($fromZero->json('events')), 'body'))->toContain('Older than the session.');
+});
+
+it('returns an event written after the session started', function (): void {
+    // Named for what it checks. The ordering property the cursor rests on -- that an id below it
+    // cannot still be in flight -- is NOT under test here and cannot be: this is one connection,
+    // and SQLite serializes writers. `tests/FeedOrderingTest.php` proves the lock holds; telling
+    // `$enrolled->id` apart from a `MAX(id)` read outside it needs a second connection, which is
+    // the `cross-connection` group and is #62's measurement.
+    $installation = $this->approveInstallation($this->mine, [Ability::EventsPost->value], machineLabel: 'fresh');
+
+    $started = $this->machine($this->installationCredential($installation))
+        ->postJson(route('robot-council.sessions.start'));
+
+    $cursor = intValue($started->json('feed_cursor'));
+
+    $this->service(FleetEvents::class)->record(FleetEventType::Directive, null, 'Immediately after.');
+
+    $read = $this->machine(stringValue($started->json('token')))
+        ->getJson(route('robot-council.events.index', ['after' => $cursor]));
+
+    expect(array_column(arrayValue($read->json('events')), 'body'))->toContain('Immediately after.');
+});
+
+it('indexes the two branches a reader is filtered on, and nothing redundant beside them', function (): void {
+    // Asserted on the schema rather than on a plan: a plan needs a seeded feed and two engines,
+    // which is #62. What the schema can say is which indexes exist, and that matters in both
+    // directions -- a composite whose leftmost column is already indexed on its own is write cost
+    // on an append-only feed for a query no engine would choose the narrower index for.
+    //
+    // Lower-cased because the engine decides the case it reports identifiers in, and this assertion
+    // has to mean the same thing on SQLite, Postgres and MySQL.
+    $indexes = array_map(
+        fn (mixed $index): array => array_map(
+            fn (mixed $column): string => strtolower(stringValue($column)),
+            arrayValue(arrayValue($index)['columns'] ?? null),
+        ),
+        Schema::getIndexes('robot_council_events'),
+    );
+
+    expect($indexes)->toContain(['agent_session_id', 'id'])
+        ->toContain(['type', 'id'])
+
+        // Each composite's leftmost column, which the composite already serves -- including the
+        // foreign key's own cascade and MySQL's requirement that its column be indexed
+        ->and($indexes)->not->toContain(['agent_session_id'])
+        ->and($indexes)->not->toContain(['type'])
+
+        // And an index nobody asked for, so `not->toContain` is shown to be capable of failing
+        ->and($indexes)->not->toContain(['posted_with_coordinator', 'id']);
 });

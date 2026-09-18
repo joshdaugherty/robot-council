@@ -11,6 +11,34 @@ use RobotCouncil\Tests\TestCase;
 pest()->extend(TestCase::class)->in(__DIR__);
 
 /**
+ * Every unescaped echo in one Blade template, as the expressions they render.
+ *
+ * `{!! $x !!}` writes bytes straight into the document where `{{ $x }}` runs them through
+ * `htmlspecialchars`, so this is the construct that turns a value written by another developer's
+ * agent into markup on this developer's screen.
+ *
+ * Two things are deliberately not matched, both of which a naive search reports. A Blade comment is
+ * stripped before compilation, so an echo inside one renders nothing. And `{!! !!}` with nothing
+ * between the braces is how prose refers to the construct -- this package's own verification page
+ * contains that exact sentence, and a check that counted it would report the file it was written to
+ * protect. `tests/EscapingGuardTest.php` exercises both on every run.
+ *
+ * @param  string  $template  The template's contents.
+ * @return list<string> The echoed expressions, in the order they appear.
+ */
+function unescapedEchoes(string $template): array
+{
+    $withoutComments = preg_replace('/\{\{--.*?--\}\}/s', '', $template) ?? $template;
+
+    preg_match_all('/\{!!\s*(?!\s*!!\})(.+?)!!\}/s', $withoutComments, $matches);
+
+    return array_map(
+        static fn (string $expression): string => trim((string) preg_replace('/\s+/', ' ', $expression)),
+        $matches[1]
+    );
+}
+
+/**
  * Start an enrollment through the real endpoint, and hand back everything a helper would hold.
  *
  * Going through the endpoint rather than writing a row keeps the fixtures honest: the hashes the

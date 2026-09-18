@@ -58,6 +58,18 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
 
 - **Every API must exist in the lowest supported Laravel version.** `composer.json` admits Laravel `^13.23.0` (`illuminate/contracts`), but the development install resolves the newest. The floor is the lowest release CI can test: its `prefer-lowest` cells resolve `laravel/framework` v13.23.0, because `orchestra/testbench ^11.2.0` requires it. Move the constraint whenever that tested floor moves, for example after raising the Testbench constraint.
 - **Anything written into `vendor/orchestra/testbench-core/laravel/` changes what the tools see, and CI has none of it.** That skeleton is Testbench's throwaway application, and a `vendor/bin/testbench` run or a test that publishes into it leaves files behind that a fresh CI install does not have. Two costs found so far: a `.env` copied from `.env.example` supplied an `APP_KEY` the suite was relying on, and leftover `*_create_personal_access_tokens_table.php` files under its `database/migrations/` let Larastan infer `PersonalAccessToken`'s columns, so `composer analyse` passed locally and failed in CI on `Access to an undefined property`. To reproduce a CI-only analysis failure, empty that directory and delete `build/phpstan` before running. Do not write narrowing that only one side asks for: `Command::argument()` and package view strings are inferred differently depending on whether the analyzer could boot the application, so a check written for one side is reported as dead code by the other. Take `mixed` and narrow inside a helper, as `Access\Tokens` and `Console\Argument` do.
+- **Restoring a Blade view does not undo it: the compiled view wins on mtime.** Blade recompiles only
+  when the source is newer than its cache under
+  `vendor/orchestra/testbench-core/laravel/storage/framework/views/`, and a `cp` restore writes an
+  mtime a second *older* than the compile that the planted run produced. Measured while
+  mutation-controlling `resources/views/enroll.blade.php`: with the source byte-identical to `HEAD`
+  and `cmp` confirming it, the cached compile still held `$code->machine_label` with no `e()`
+  wrapper, so three rows of the new guard and the unrelated
+  `DeviceVerificationTest > it escapes what the requester supplied` all failed against a view nobody
+  had changed. The restore reads as complete and the next run tests the planted version. **Any
+  mutation control that edits a Blade view has to clear that directory afterwards**, and a failure in
+  a view test that `git diff` cannot explain is this until proven otherwise.
+
 - **The local suite and CI run on different cache stores, and nothing records it.** A local
   checkout may have `vendor/orchestra/testbench-core/laravel/.env` with `CACHE_STORE=database`,
   copied there by a `vendor/bin/testbench` run; a fresh CI install has no `.env`, so `cache.default`

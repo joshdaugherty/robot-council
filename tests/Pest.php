@@ -11,6 +11,135 @@ use RobotCouncil\Tests\TestCase;
 pest()->extend(TestCase::class)->in(__DIR__);
 
 /**
+ * Every file under a directory with one suffix, at any depth.
+ *
+ * Recursive deliberately. `glob('<dir>/*.blade.php')` matches only the top level, and a guard built
+ * on it goes on passing while a whole subdirectory is unexamined -- the failure looks like a clean
+ * result, because one top-level file keeps the list non-empty forever.
+ *
+ * `FOLLOW_SYMLINKS` because without it `RecursiveDirectoryIterator::hasChildren()` defaults to
+ * refusing links, so a symlinked directory is yielded as a leaf and then dropped by the suffix
+ * test -- the same silent-skip shape the recursion was written to fix. The suffix is compared
+ * case-insensitively, because macOS and Windows resolve `X.BLADE.PHP` while a byte-exact test
+ * does not.
+ *
+ * An unreadable directory throws `UnexpectedValueException` rather than being skipped, and that is
+ * deliberate: a guard that quietly walked past a directory it could not open would report clean.
+ *
+ * @param  string  $directory  The directory to walk.
+ * @param  string  $suffix  The file suffix to keep.
+ * @return list<string> Absolute paths.
+ */
+function filesUnder(string $directory, string $suffix): array
+{
+    if (! is_dir($directory)) {
+        return [];
+    }
+
+    $found = [];
+
+    $flags = FilesystemIterator::SKIP_DOTS | FilesystemIterator::FOLLOW_SYMLINKS;
+
+    /** @var SplFileInfo $file */
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory, $flags)) as $file) {
+        if (str_ends_with(strtolower($file->getFilename()), strtolower($suffix))) {
+            $found[] = $file->getPathname();
+        }
+    }
+
+    sort($found);
+
+    return $found;
+}
+
+/**
+ * Every Blade template under a directory, at any depth.
+ *
+ * @param  string  $directory  The directory to walk.
+ * @return list<string> Absolute paths.
+ */
+function bladeTemplatesIn(string $directory): array
+{
+    return filesUnder($directory, '.blade.php');
+}
+
+/**
+ * Every PHP source file under a directory, at any depth.
+ *
+ * @param  string  $directory  The directory to walk.
+ * @return list<string> Absolute paths.
+ */
+function phpSourcesIn(string $directory): array
+{
+    return filesUnder($directory, '.php');
+}
+
+/**
+ * Every construct in one Blade template that can put bytes into the document unescaped.
+ *
+ * Not only `{!! !!}`. Blade compiles three shapes that skip `e()`, and a guard that knew about one
+ * of them reported clean on the other two -- measured against the real
+ * `Illuminate\View\Compilers\BladeCompiler::compileString()` rather than reasoned about:
+ *
+ * - `{!! $x !!}`, which compiles to `<?php echo $x; ?>`.
+ * - `@php echo $x; @endphp`, which compiles to exactly the same thing.
+ * - A raw `<?php echo $x; ?>` or `<?= $x ?>`, likewise -- a one-line rewrite of the first that
+ *   carries no visual warning at all.
+ *
+ * **The order here mirrors Blade's, and that is load-bearing.** `compileString()` calls
+ * `storeUncompiledBlocks()` before `compileComments()`, so a `{{--` inside `@verbatim` or `@php` is
+ * already a placeholder when the comment regex runs and cannot open a comment. Stripping comments
+ * first instead, over the whole file, lets a stray `{{--` in a verbatim block swallow everything up
+ * to the next real `--}}`: measured, a `{!! $evil !!}` between them went unreported while Blade
+ * compiled it into a live echo. `@verbatim` is the standard escape for Alpine and Vue mustaches, so
+ * a Livewire dashboard is a plausible place to meet one.
+ *
+ * A genuinely unclosed `{{--` needs no special handling. Blade's own `compileComments()` uses the
+ * same non-greedy pattern over the whole string, so both strip the identical span and the echo
+ * inside it really does not render -- verified in both directions.
+ *
+ * What this cannot see is `{{ $x }}` where `$x` is `Htmlable`, because `e()` returns `toHtml()`
+ * unescaped for those. No pattern over a template can tell that apart; `tests/EscapingGuardTest.php`
+ * carries a separate check that the package never constructs one.
+ *
+ * @param  string  $template  The template's contents.
+ * @return list<string> One description per construct found.
+ */
+function rawOutputIn(string $template): array
+{
+    $findings = [];
+
+    // Taken out first, exactly as Blade takes them out first. Their contents are reported rather
+    // than discarded, because a `@php` block is one of the shapes being looked for.
+    $withoutBlocks = preg_replace_callback(
+        '/@verbatim(?<verbatim>.*?)@endverbatim|@php(?<php>.*?)@endphp/s',
+        static function (array $match) use (&$findings): string {
+            if (($match['php'] ?? '') !== '') {
+                $findings[] = '@php block: '.trim((string) preg_replace('/\s+/', ' ', $match['php']));
+            }
+
+            return '';
+        },
+        $template
+    ) ?? $template;
+
+    $withoutComments = preg_replace('/\{\{--.*?--\}\}/s', '', $withoutBlocks) ?? $withoutBlocks;
+
+    // Blade leaves a raw PHP tag alone, and it echoes whatever it is given
+    if (preg_match('/<\?(?:php|=)/', $withoutComments) === 1) {
+        $findings[] = 'a raw PHP tag';
+    }
+
+    preg_match_all('/\{!!\s*(?!\s*!!\})(.+?)!!\}/s', $withoutComments, $matches);
+
+    foreach ($matches[1] as $expression) {
+        $findings[] = 'unescaped echo: {!! '.trim((string) preg_replace('/\s+/', ' ', $expression)).' !!}';
+    }
+
+    return $findings;
+}
+
+/**
  * Start an enrollment through the real endpoint, and hand back everything a helper would hold.
  *
  * Going through the endpoint rather than writing a row keeps the fixtures honest: the hashes the

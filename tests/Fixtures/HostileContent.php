@@ -46,8 +46,14 @@ final class HostileContent
             'an attribute breakout' => [
                 'payload' => '"><img src=x onerror=alert(1)>',
                 'sink' => 'an HTML attribute',
+                // The quote is the half that performs the breakout, so it is asserted through
+                // `escaped` rather than through `forbidden`. Measured with `ENT_NOQUOTES`, which
+                // escapes the tag and leaves the quote to close the surrounding attribute, the row
+                // passes on the forbidden list alone and fails on `&quot;`. Listing `">` as
+                // forbidden instead does not work at document scope: it occurs 24 times in the
+                // verification page's own markup, so that assertion could never pass.
                 'forbidden' => ['<img src=x', 'onerror=alert(1)>'],
-                'escaped' => '&lt;img src=x',
+                'escaped' => '&quot;&gt;&lt;img src=x',
             ],
 
             // Nothing about this string is altered by `htmlspecialchars`, so a page is safe from it
@@ -71,16 +77,19 @@ final class HostileContent
     }
 
     /**
-     * The payloads as a Pest dataset, one row per sink.
+     * The payloads as a Pest dataset.
      *
-     * @return array<string, array{string, string, list<string>, string|null}>
+     * `sink` is deliberately not passed through. It records which construct each payload is aimed
+     * at, which belongs beside the payload rather than in a test signature that never reads it.
+     *
+     * @return array<string, array{string, list<string>, string|null}>
      */
     public static function dataset(): array
     {
         $rows = [];
 
         foreach (self::payloads() as $name => $case) {
-            $rows[$name] = [$case['payload'], $case['sink'], $case['forbidden'], $case['escaped']];
+            $rows[$name] = [$case['payload'], $case['forbidden'], $case['escaped']];
         }
 
         return $rows;

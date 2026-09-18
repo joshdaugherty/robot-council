@@ -46,9 +46,13 @@ Route::post('device/token', DeviceTokenController::class)
     ->middleware('throttle:'.RobotCouncilServiceProvider::DEVICE_TOKEN_LIMITER)
     ->name('device.token');
 
-// The limiter resolves the installation itself: the router sorts `ThrottleRequests` ahead of any
-// middleware outside its priority list, so this group's order is not the order they run in
-Route::middleware([EnsureInstallation::class, 'throttle:'.RobotCouncilServiceProvider::SESSIONS_LIMITER])
+// The limiter is declared FIRST because declaration order is what decides this. `sortMiddleware()`
+// reorders only middleware that are themselves in the framework's priority list, relative to each
+// other, and `EnsureInstallation` is not in it -- so with `ThrottleRequests` the only member
+// present, nothing moves. Declared after the guard, the limiter never runs for a request the guard
+// refuses, and an unauthenticated flood is not limited at all. The limiter resolves the
+// installation through the guard, so it needs nothing the guard would have left behind.
+Route::middleware(['throttle:'.RobotCouncilServiceProvider::SESSIONS_LIMITER, EnsureInstallation::class])
     ->group(function (): void {
         Route::post('sessions', SessionStartController::class)->name('sessions.start');
         // Constrained, so an id no bigint can hold is a 404 rather than a 500. `whereNumber` is
@@ -66,8 +70,9 @@ Route::middleware([EnsureInstallation::class, 'throttle:'.RobotCouncilServicePro
             ->name('sessions.end');
     });
 
-// Every agent route is limited per session, so one runaway process cannot crowd out the fleet
-Route::middleware([EnsureAgentSession::class, 'throttle:'.RobotCouncilServiceProvider::AGENT_LIMITER])
+// Every agent route is limited per session, so one runaway process cannot crowd out the fleet --
+// and the limiter is declared ahead of the guard, for the reason the sessions group records
+Route::middleware(['throttle:'.RobotCouncilServiceProvider::AGENT_LIMITER, EnsureAgentSession::class])
     ->group(function (): void {
         Route::get('agent/session', AgentSessionController::class)->name('agent.session');
 

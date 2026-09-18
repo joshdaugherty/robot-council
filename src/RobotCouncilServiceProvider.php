@@ -271,11 +271,24 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
     /**
      * Mount the MCP server beside the machine routes.
      *
-     * Behind the same guard and principal middleware as every other agent route: `Mcp::web()`
-     * registers its own routes, so the middleware is applied to what it returns rather than
-     * declared around it. The agent middleware is what makes a tool call arrive as a session --
-     * `Http\Principal` refuses to hand a tool anything otherwise, so a server mounted without it
-     * fails loudly rather than serving the fleet's tools to whoever asked.
+     * Behind the same guard, principal middleware and rate limit as every other agent route. The
+     * agent middleware is what makes a tool call arrive as a session -- `Http\Principal` refuses to
+     * hand a tool anything otherwise, so a server mounted without it fails loudly rather than
+     * serving the fleet's tools to whoever asked.
+     *
+     * **Declared as a group rather than applied to the returned route**, because `Mcp::web()`
+     * registers three routes and returns only the POST one: it answers `GET` and `DELETE` on the
+     * same URI with a constant 405 to satisfy the transport specification. Middleware applied to the
+     * return value reaches POST alone, which leaves two unauthenticated, unthrottled endpoints a
+     * host inherits and cannot put its own perimeter in front of. A group covers all three.
+     *
+     * It also orders the pipeline the right way round. The group's middleware merges *ahead* of the
+     * transport's own, so the limiter and the guard run before `ValidateMcpHeaders` decodes the
+     * body, and an unauthenticated caller no longer costs the host a JSON parse of up to
+     * `post_max_size`. Nothing is lost by moving `AddWwwAuthenticateHeader` inward: it decorates a
+     * 401 it receives as a *response*, and `EnsureAgentSession` throws `UnauthorizedHttpException`,
+     * which carries the `Bearer` challenge itself and unwinds past every inner middleware to the
+     * host's exception handler.
      *
      * `mcp:inspector` does not list this server while a host has cached its routes, because Laravel
      * skips a package's route files then and this registration runs inside that same guard.
@@ -285,13 +298,15 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
      */
     private function registerMcpServer(string $prefix, array $middleware): void
     {
-        Mcp::web(trim($prefix, '/').'/mcp', CouncilServer::class)
-            ->middleware([
-                ...array_values(array_filter($middleware, \is_string(...))),
-                EnsureAgentSession::class,
-                'throttle:'.self::AGENT_LIMITER,
-            ])
-            ->name('robot-council.mcp');
+        $uri = trim($prefix, '/').'/mcp';
+
+        Route::middleware([
+            ...array_values($middleware),
+            'throttle:'.self::AGENT_LIMITER,
+            EnsureAgentSession::class,
+        ])->group(function () use ($uri): void {
+            Mcp::web($uri, CouncilServer::class)->name('robot-council.mcp');
+        });
     }
 
     /**
@@ -379,8 +394,8 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
         });
 
         RateLimiter::for(self::AGENT_LIMITER, static function (Request $request) use ($credentials): Limit {
-            // Resolved through the guard for the reason the sessions limiter records: the router
-            // sorts `ThrottleRequests` ahead of any middleware outside its priority list
+            // Resolved through the guard for the reason the sessions limiter records: the limiter
+            // runs ahead of the guard middleware, so nothing has been left on the request yet
             $session = $request->user(ApiGuards::AGENT);
 
             $subject = $session instanceof AgentSession
@@ -398,10 +413,10 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
 
         RateLimiter::for(self::SESSIONS_LIMITER, static function (Request $request) use ($credentials): Limit {
             // Resolved through the guard rather than read from what `EnsureInstallation` leaves on
-            // the request. `ThrottleRequests` is in the framework's middleware priority list and
-            // this middleware is not, so the router sorts the limiter ahead of it whatever order
-            // the route declares, and the request attribute is not set yet. Keyed on the address
-            // when no installation resolves, which is what an unauthenticated flood looks like.
+            // the request: the routes declare this limiter ahead of that middleware, so the request
+            // attribute is not set yet. Keyed on the address when no installation resolves, which
+            // is what an unauthenticated flood looks like -- and what the route order makes
+            // reachable, because a limiter declared after the guard never sees one.
             $installation = $request->user(ApiGuards::INSTALLATION);
 
             $subject = $installation instanceof Installation

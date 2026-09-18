@@ -9,10 +9,11 @@ use RuntimeException;
 /**
  * Narrowing for the arguments an MCP call arrives with.
  *
- * A tool's arguments are validated against its schema before `handle()` runs, so by the time these
- * are reached the shape is already right. What they add is a type the analyzer can see: `Request`
- * returns `mixed`, and a cast would turn an absent argument into `0` or `''` and carry on rather
- * than saying so.
+ * **A tool's schema is advertised, not enforced.** `laravel/mcp` serializes it into `tools/list` and
+ * then calls `handle()` with whatever arrived -- `Server\ToolInvoker` has no validation step at all.
+ * So every tool validates the arguments it acts on, the same way its REST endpoint does, and these
+ * narrow what is left afterwards. A cast would turn an absent argument into `0` or `''` and carry
+ * on; these refuse, so a malformed call cannot be mistaken for a call that meant zero.
  */
 final class Arguments
 {

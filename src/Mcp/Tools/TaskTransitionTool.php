@@ -11,6 +11,7 @@ use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Tool;
 use RobotCouncil\Access\Ability;
+use RobotCouncil\Http\Rules\BoundedMeta;
 use RobotCouncil\Mcp\ActsAsAgent;
 use RobotCouncil\Mcp\Arguments;
 use RobotCouncil\Models\AgentSession;
@@ -117,6 +118,19 @@ final class TaskTransitionTool extends Tool
         if (! $permitted) {
             return $this->refuse($this->transition->ability());
         }
+
+        // The schema advertises these; nothing enforces it, so the tool does. Without this an
+        // absent or non-numeric `task_id` reaches `Arguments::integer()`, throws, and comes back
+        // to the agent as `An internal server error occurred.` with an exception in the host's log.
+        $request->validate([
+            'task_id' => ['required', 'integer', 'min:1'],
+            'session_id' => $this->transition === TaskTransition::Reassign
+                ? ['required', 'integer', 'min:1']
+                : ['prohibited'],
+            'result' => $this->transition->takesAResult()
+                ? ['sometimes', 'nullable', 'array', new BoundedMeta]
+                : ['prohibited'],
+        ]);
 
         $assignee = null;
 

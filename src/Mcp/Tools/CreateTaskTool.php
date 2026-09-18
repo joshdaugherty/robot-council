@@ -11,6 +11,7 @@ use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Tool;
 use RobotCouncil\Access\Ability;
+use RobotCouncil\Http\Rules\BoundedMeta;
 use RobotCouncil\Mcp\ActsAsAgent;
 use RobotCouncil\Mcp\Arguments;
 use RobotCouncil\Models\Task;
@@ -91,6 +92,11 @@ final class CreateTaskTool extends Tool
             'title' => ['required', 'string', 'max:'.Task::MAX_TITLE],
             'description' => ['sometimes', 'nullable', 'string', 'max:'.Task::MAX_DESCRIPTION],
             'priority' => ['sometimes', 'integer', 'between:0,'.Task::MAX_PRIORITY],
+
+            // Bounded in bytes and in depth once encoded. An `array` rule bounds nothing, and this
+            // is the surface a session holding only `tasks:create` reaches -- without it the tool
+            // reopens exactly what `BoundedMeta` exists to close, on a new door.
+            'payload' => ['sometimes', 'nullable', 'array', new BoundedMeta],
             'project_id' => ['sometimes', 'nullable', 'string', 'max:128', 'regex:/^[A-Za-z0-9._\/-]{1,128}$/D'],
             'parent_task_id' => ['sometimes', 'nullable', 'integer', 'exists:robot_council_tasks,id'],
         ]);

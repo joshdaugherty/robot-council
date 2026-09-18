@@ -6,6 +6,7 @@ namespace RobotCouncil\Mcp\Tools;
 
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Http\Request as HttpRequest;
+use Illuminate\Support\Carbon;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
@@ -140,6 +141,12 @@ final class LockTool extends Tool
             'held' => $lock instanceof Lock,
             'fence' => $lock?->fence,
             'expires_at' => $lock?->expires_at?->toIso8601String(),
+
+            // The same duration the REST response carries, and for the same reason: a bridge on a
+            // machine whose clock is wrong can use it and cannot use the instant
+            'expires_in' => $lock?->expires_at === null
+                ? null
+                : max(0, Carbon::now()->diffInSeconds($lock->expires_at, false)),
         ], static fn (mixed $value): bool => $value !== null));
     }
 

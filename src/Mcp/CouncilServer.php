@@ -10,7 +10,6 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Version;
 use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\Tool;
-use RobotCouncil\Access\Ability;
 use RobotCouncil\Mcp\Tools\CreateTaskTool;
 use RobotCouncil\Mcp\Tools\HeartbeatTool;
 use RobotCouncil\Mcp\Tools\ListTasksTool;
@@ -87,22 +86,6 @@ final class CouncilServer extends Server
             new PostNarrationTool,
             new PostDirectiveTool,
             new HeartbeatTool,
-        ];
-    }
-
-    /**
-     * The abilities the tools on this server between them require.
-     *
-     * @return list<Ability> Every ability a tool checks.
-     */
-    public static function abilities(): array
-    {
-        return [
-            Ability::TasksCreate,
-            Ability::TasksClaim,
-            Ability::LocksAcquire,
-            Ability::EventsPost,
-            Ability::CoordinatorDirect,
         ];
     }
 }

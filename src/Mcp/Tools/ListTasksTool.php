@@ -6,6 +6,7 @@ namespace RobotCouncil\Mcp\Tools;
 
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Http\Request as HttpRequest;
+use Illuminate\Validation\Rule;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
@@ -79,6 +80,15 @@ final class ListTasksTool extends Tool
      */
     public function handle(Request $request, HttpRequest $http, TaskList $tasks): ResponseFactory
     {
+        // Both halves of the cursor or neither: the ordering is a pair, and half of it names no
+        // position. Without this an `after_id` alone reaches `Arguments::integer(null)` and throws.
+        $request->validate([
+            'status' => ['sometimes', 'string', Rule::enum(TaskStatus::class)],
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:'.TaskList::MAX_PAGE],
+            'after_priority' => ['nullable', 'required_with:after_id', 'integer', 'min:0'],
+            'after_id' => ['nullable', 'required_with:after_priority', 'integer', 'min:1'],
+        ]);
+
         $status = $request->get('status');
         $afterId = $request->get('after_id');
 

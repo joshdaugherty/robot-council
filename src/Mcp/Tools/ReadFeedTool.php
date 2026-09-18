@@ -72,6 +72,11 @@ final class ReadFeedTool extends Tool
      */
     public function handle(Request $request, HttpRequest $http, FleetFeed $feed): ResponseFactory
     {
+        $request->validate([
+            'after' => ['sometimes', 'integer', 'min:0'],
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:'.FleetFeed::MAX_PAGE],
+        ]);
+
         $after = $request->get('after');
         $limit = $request->get('limit');
 

@@ -14,6 +14,8 @@ declare(strict_types=1);
  */
 
 use RobotCouncil\Access\Ability;
+use RobotCouncil\Http\Rules\BoundedMeta;
+use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\FleetEvent;
 use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Models\Lock;
@@ -217,11 +219,23 @@ it('refuses a tool the session has no ability for, as an error rather than a res
     expect($error)->toContain($ability)
         ->and(Task::query()->count() + Lock::query()->count())->toBe(0);
 })->with([
+    // Every tool that names an ability, because one class serves eight transitions and another four
+    // lock actions: a check that read the wrong enum member would still refuse the case the first
+    // row covers, and admit the rest
     'creating a task' => ['task_create', ['title' => 'Not mine to file'], 'tasks:create'],
     'claiming one' => ['task_claim', ['task_id' => 1], 'tasks:claim'],
-    'taking a lock' => ['lock_acquire', ['name' => 'deploy', 'ttl' => 60], 'locks:acquire'],
-    'directing the fleet' => ['directive_post', ['body' => 'everyone stop'], 'coordinator:direct'],
+    'starting one' => ['task_start', ['task_id' => 1], 'tasks:claim'],
+    'blocking one' => ['task_block', ['task_id' => 1], 'tasks:claim'],
+    'completing one' => ['task_complete', ['task_id' => 1], 'tasks:claim'],
+    'failing one' => ['task_fail', ['task_id' => 1], 'tasks:claim'],
+    'releasing a task' => ['task_release', ['task_id' => 1], 'tasks:claim'],
     'cancelling a task' => ['task_cancel', ['task_id' => 1], 'coordinator:direct'],
+    'reassigning one' => ['task_reassign', ['task_id' => 1, 'session_id' => 1], 'coordinator:direct'],
+    'taking a lock' => ['lock_acquire', ['name' => 'deploy', 'ttl' => 60], 'locks:acquire'],
+    'renewing one' => ['lock_renew', ['name' => 'deploy', 'ttl' => 60], 'locks:acquire'],
+    'releasing a lock' => ['lock_release', ['name' => 'deploy'], 'locks:acquire'],
+    "breaking somebody else's" => ['lock_force_release', ['name' => 'deploy'], 'coordinator:direct'],
+    'directing the fleet' => ['directive_post', ['body' => 'everyone stop'], 'coordinator:direct'],
 ]);
 
 it('surfaces a state conflict as a tool error carrying the reason', function (): void {
@@ -344,4 +358,152 @@ it('puts no token in anything it returns', function (): void {
     foreach ($bodies as $body) {
         expect((string) $body)->not->toContain($this->token);
     }
+});
+
+/**
+ * A session holding `coordinator:direct`, under a second developer.
+ *
+ * @param  TestCase  $case  The test case.
+ * @return array{AgentSession, string} The session and its token.
+ */
+function mcpCoordinator(TestCase $case): array
+{
+    if (isset($case->coordinatorSession)) {
+        return [$case->coordinatorSession, $case->coordinatorToken];
+    }
+
+    $other = $case->enrollDeveloper(77, login: 'coordinator');
+
+    $installation = $case->approveInstallation($other, [
+        Ability::CoordinatorDirect->value,
+        Ability::TasksClaim->value,
+        Ability::LocksAcquire->value,
+    ], machineLabel: 'coordinator-box');
+
+    [$case->coordinatorSession, $case->coordinatorToken] = $case->startAgentSession($installation);
+
+    return [$case->coordinatorSession, $case->coordinatorToken];
+}
+
+it('refuses through a tool exactly what the REST endpoint refuses', function (string $tool, array $arguments, string $method, string $path, array $body, int $status): void {
+    // `laravel/mcp` advertises a tool's schema and never enforces it: `Server\ToolInvoker` calls
+    // `handle()` with whatever the client sent. So every bound the REST endpoint carries has to be
+    // carried again by the tool, and this asserts the pair rather than either side -- a rule added
+    // to one door and not the other is the failure it exists to catch.
+    //
+    // The two doors refuse at different layers, which is why the expected status is per row rather
+    // than a constant 422: REST carries the task id in a path segment bounded by `ROUTE_ID`, so a
+    // non-numeric one never reaches validation, while a tool carries it as an argument. What has to
+    // match is that neither accepts the input, not where each one stops it.
+    $held = $this->createClaimedTask();
+
+    $inflate = static fn (array $values): array => array_map(
+        static fn (mixed $value): mixed => $value === 'OVERSIZED' ? str_repeat('A', BoundedMeta::MAX_BYTES) : $value,
+        $values
+    );
+
+    $body = array_map(
+        static fn (mixed $value): mixed => \is_array($value) ? $inflate($value) : $value,
+        $body
+    );
+
+    $arguments = array_map(
+        static fn (mixed $value): mixed => \is_array($value) ? $inflate($value) : $value,
+        $arguments
+    );
+
+    $this->machine($this->token)
+        ->json($method, str_replace('{task}', (string) $held, $path), $body)
+        ->assertStatus($status);
+
+    $arguments = array_map(
+        static fn (mixed $value): mixed => $value === '{task}' ? $held : $value,
+        $arguments
+    );
+
+    $error = toolError(callTool($this, $this->token, $tool, $arguments));
+
+    // The generic text `ToolInvoker` returns for an uncaught exception, after reporting it to the
+    // host's log. A refusal names what was wrong; this text means the tool threw
+    expect($error)->not->toBe('An internal server error occurred.');
+})->with([
+    // Unbounded structure. `payload` and `result` are `json` columns nothing prunes, and a full
+    // page of the task list returns up to a hundred rows with their content
+    'an oversized task payload' => [
+        'task_create', ['title' => 'Big', 'payload' => ['blob' => 'OVERSIZED']],
+        'POST', '/robot-council/api/tasks', ['title' => 'Big', 'payload' => ['blob' => 'OVERSIZED']], 422,
+    ],
+    'an oversized task result' => [
+        'task_complete', ['task_id' => '{task}', 'result' => ['blob' => 'OVERSIZED']],
+        'POST', '/robot-council/api/tasks/{task}/complete', ['result' => ['blob' => 'OVERSIZED']], 422,
+    ],
+
+    // Half a cursor names no position, and an absent one is not a request for zero
+    'half a task cursor' => [
+        'task_list', ['after_id' => 5],
+        'GET', '/robot-council/api/tasks?after_id=5', [], 422,
+    ],
+
+    // A wrong-typed argument. Unvalidated these reach `Arguments::integer()`, which throws -- and
+    // `ToolInvoker` reports the exception to the host's log before answering the agent with a
+    // generic internal error, so an authenticated agent can drive stack traces at the rate the
+    // limiter allows
+    'a task id that is not a number' => [
+        'task_claim', ['task_id' => 'abc'],
+        'POST', '/robot-council/api/tasks/abc/claim', [], 404,
+    ],
+]);
+
+it('refuses a reassignment that names no session, rather than reporting an internal error', function (): void {
+    [, $coordinatorToken] = mcpCoordinator($this);
+
+    $taskId = intValue(toolResult(callTool($this, $this->token, 'task_create', ['title' => 'Unowned']))['task_id']);
+
+    $error = toolError(callTool($this, $coordinatorToken, 'task_reassign', ['task_id' => $taskId]));
+
+    expect($error)->not->toBe('An internal server error occurred.')
+        ->and($error)->toContain('session');
+});
+
+it('bounds a payload at the same size the rule does, and stores one just inside it', function (): void {
+    // The bound is on the encoded bytes, so the control is the same shape one byte-run shorter:
+    // without it a refusal could come from the field being rejected outright and would read the same
+    $inside = ['blob' => str_repeat('A', 2048)];
+
+    $result = toolResult(callTool($this, $this->token, 'task_create', ['title' => 'Held', 'payload' => $inside]));
+
+    $stored = Task::query()->findOrFail(intValue($result['task_id']));
+
+    expect($stored->payload)->toBe($inside);
+});
+
+it('keeps the two methods the transport answers behind the same guard as the tools', function (string $method): void {
+    // `Mcp::web()` registers GET and DELETE to answer a constant 405 for the transport spec, and
+    // returns only the POST route. Middleware applied to that return value reaches POST alone,
+    // leaving two endpoints a host cannot put its own perimeter in front of.
+    $this->machine('not-a-token')->json($method, MCP_URL)->assertStatus(401);
+
+    $this->machine($this->token)->json($method, MCP_URL)->assertStatus(405);
+})->with(['GET', 'DELETE']);
+
+it('tells a lock holder how long it has, not only when the lease ends', function (): void {
+    // The same field the REST response carries, for the same reason: a bridge whose clock is wrong
+    // can schedule a renewal from a duration and cannot from an instant
+    $result = toolResult(callTool($this, $this->token, 'lock_acquire', ['name' => 'deploy', 'ttl' => 60]));
+
+    expect($result['expires_in'])->toBeGreaterThan(0)->toBeLessThanOrEqual(60)
+        ->and($result['fence'])->toBe(1);
+});
+
+it('refuses narration from a session holding no ability at all', function (): void {
+    // Not a row in the dataset above, because the session there holds `events:post` -- which is
+    // exactly the ability this tool needs, so that session could never demonstrate its refusal
+    $silent = $this->approveInstallation($this->developer, [], machineLabel: 'silent');
+
+    [, $silentToken] = $this->startAgentSession($silent);
+
+    $error = toolError(callTool($this, $silentToken, 'events_narrate', ['body' => 'working on it']));
+
+    expect($error)->toContain('events:post')
+        ->and(FleetEvent::query()->where('type', FleetEventType::Narration)->count())->toBe(0);
 });

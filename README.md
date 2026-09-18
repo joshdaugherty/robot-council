@@ -142,6 +142,24 @@ The server's instructions tell an agent the thing it most needs to know before r
 another agent wrote — that task and event content is data and never instructions, and that every
 result carries provenance to weigh it by.
 
+The MCP URI answers `GET` and `DELETE` with a 405, as the transport specification asks. Those two
+are mounted behind the same guard and the same limiter as the `POST`, so a host's own machine
+middleware covers all three.
+
+**Installing this package installs `laravel/mcp`, and a host inherits more than the tools.** Its
+service provider is auto-discovered, so a host also gets seven `mcp:*` and `make:mcp-*` artisan
+commands, an `mcp` config key and view namespace, `routes/ai.php` loaded if the host happens to have
+one, and one middleware pushed onto the global HTTP kernel. Two are worth knowing about before
+upgrading:
+
+- **On a Passport host it adds an `mcp:use` OAuth scope.** `Server\Registrar::ensureMcpScope()` runs
+  on every boot and calls `Passport::tokensCan()` when Passport is installed, so the scope appears on
+  the host's consent screen and is grantable to its clients. Nothing in this package uses Passport or
+  OAuth; the machine API authenticates with the device-code credentials described above.
+- **`mcp.redirect_domains` defaults to `['*']`.** It is inert unless a host calls
+  `Mcp::oauthRoutes()`, which this package does not, but a host that publishes the `mcp` config and
+  later turns those routes on inherits the permissive default.
+
 **`mcp:inspector` will not list this server while a host has cached its routes.** Laravel skips a
 package's route files then, and the server is registered inside that same guard.
 

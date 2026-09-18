@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace RobotCouncil\Tests;
 
-use BladeUI\Heroicons\BladeHeroiconsServiceProvider;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Artisan;
@@ -15,7 +14,6 @@ use Laravel\Sanctum\Sanctum;
 use Laravel\Sanctum\SanctumServiceProvider;
 use Laravel\Socialite\SocialiteServiceProvider;
 use Livewire\LivewireServiceProvider;
-use Mary\MaryServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
 use ReflectionClass;
 use RobotCouncil\Access\Ability;
@@ -114,12 +112,9 @@ class TestCase extends Orchestra
             SocialiteServiceProvider::class,
             SanctumServiceProvider::class,
 
-            // The dashboard's stack. Mary's components are Blade components registered by its
-            // provider, and Blade Heroicons is Mary's own dependency rather than this package's --
-            // a host gets all three through Composer discovery and Testbench gets none of them.
+            // The dashboard's stack. A host discovers Livewire through Composer and Testbench does
+            // not, exactly as with Socialite above.
             LivewireServiceProvider::class,
-            BladeHeroiconsServiceProvider::class,
-            MaryServiceProvider::class,
 
             RobotCouncilServiceProvider::class,
         ];

@@ -41,7 +41,7 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
   are committed.
 - `src/Livewire/` — the dashboard's Livewire components, mounted by `routes/web.php` behind the
   allowlist gate. Testbench registers no provider it is not told about, so `tests/TestCase.php`
-  lists Livewire's, Mary's and Blade Heroicons' providers by hand exactly as it does Socialite's.
+  lists Livewire's provider by hand exactly as it does Socialite's.
 - `tests/` — Pest on Orchestra Testbench. `tests/Pest.php` binds `tests/TestCase.php`, which registers the service provider; `tests/ArchTest.php` applies Pest's `php()`, `security()`, and `strict()` arch presets to the package's namespaces. Tests that read data a second database connection commits belong to the `cross-connection` group, which `phpunit.xml.dist` excludes from every run that does not name it; `tests/CrossConnectionTest.php` is the pattern.
 - `.claude/rules/` loads into every session; `.claude/skills/` loads on demand.
 
@@ -68,8 +68,11 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
   with it.** `resources/dist/dashboard.css` is compiled by `npm run build` from
   `resources/css/dashboard.css`, and a consuming application runs no asset build -- the decision on
   #30. Tailwind emits only the classes it finds by scanning, so every directory holding markup this
-  package renders must be named in an `@source`, **including Mary's components under `vendor/`**,
-  which Tailwind skips by default because it honors `.gitignore` and `/vendor` is ignored here. The
+  package renders must be named in an `@source`, and **`@import "tailwindcss" source(none)` is
+  load-bearing**: without it Tailwind's automatic detection scans the whole project on top of what
+  `@source` names, so anything anywhere that looks like a class name enters the shipped stylesheet. A
+  test asserting `bg-red-500` was absent put `bg-red-500` into the artifact and failed on itself, and
+  23 KB of the 74 KB build was classes scraped from tests and prose. The
   artifact goes stale silently: a view added without a rebuild renders with the previous build's
   classes and nothing reports it. Measured while building #72 -- the committed file was missing
   `.card-body`, `.card-title`, `.antialiased` and `.bg-base-200`, every one a class the new layout
@@ -79,7 +82,6 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
   library's dependency resolution, which CI should re-resolve, and the second is a build toolchain,
   whose drift would change the bytes a consumer receives. A CI check that the artifact matches its
   sources is #66.
-
 - **SQLite does not enforce a `varchar` length and Postgres does**, so a fixture that writes an
   overlong value passes every local run and fails only in the `postgres` job. `$table->string('x', 32)`
   is a hard limit there: Postgres answers `SQLSTATE[22001] value too long for type character

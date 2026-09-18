@@ -1,4 +1,4 @@
-<div>
+<div wire:poll.{{ $pollSeconds }}s>
     <div class="card bg-base-100 shadow-sm">
         <div class="card-body">
             <h2 class="card-title">The fleet</h2>

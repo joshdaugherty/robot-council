@@ -4,7 +4,7 @@
     "description": "The dashboard stylesheet this package ships compiled, so a consuming application runs no asset build.",
     "scripts": {
         "build": "tailwindcss --input resources/css/dashboard.css --output resources/dist/dashboard.css --minify",
-        "check": "tailwindcss --input resources/css/dashboard.css --output /tmp/robot-council-dashboard-check.css --minify && cmp /tmp/robot-council-dashboard-check.css resources/dist/dashboard.css"
+        "check": "out=$(mktemp) && tailwindcss --input resources/css/dashboard.css --output \"$out\" --minify && cmp \"$out\" resources/dist/dashboard.css && rm -f \"$out\""
     },
     "devDependencies": {
         "@tailwindcss/cli": "^4.1.0",

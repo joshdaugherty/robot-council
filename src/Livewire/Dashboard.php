@@ -7,6 +7,7 @@ namespace RobotCouncil\Livewire;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\View\View;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 /**
@@ -14,8 +15,8 @@ use Livewire\Component;
  *
  * It renders the shell and nothing else yet. The task board, presence and locks, and the change
  * feed arrive as their own slices and mount inside this page; what this component exists to prove
- * is that the whole path works -- the route, the allowlist gate, Livewire, Mary's components, and
- * the stylesheet this package compiles and serves.
+ * is that the whole path works -- the route, the allowlist gate, Livewire, and the stylesheet this
+ * package compiles and serves.
  *
  * The polling interval is read here rather than in the view, so a page that displays it and a
  * component that polls on it cannot disagree about what it is.
@@ -25,7 +26,14 @@ final class Dashboard extends Component
 {
     /**
      * The interval this page refreshes on, in seconds.
+     *
+     * Locked, because `mount()` runs once and every later request goes through `hydrate()`. A
+     * public property without this is writable by whatever posts to `/livewire/update`: the
+     * snapshot's checksum covers the snapshot rather than the `updates` map, so a client can set
+     * this to zero and ask the browser to poll as fast as it can. The validation below guards the
+     * host's configuration; this guards the client.
      */
+    #[Locked]
     public int $pollSeconds = self::DEFAULT_POLL_SECONDS;
 
     /**

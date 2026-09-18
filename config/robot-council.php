@@ -205,17 +205,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Rate limits
-    |--------------------------------------------------------------------------
-    |
-    | Attempts per minute, each against the subject named by its key. The token
-    | endpoint is limited twice, because a helper polling every few seconds is
-    | ordinary traffic while thousands of device codes from one address are not.
-    |
-    */
-
-    /*
-    |--------------------------------------------------------------------------
     | Dashboard
     |--------------------------------------------------------------------------
     |
@@ -228,6 +217,17 @@ return [
     'dashboard' => [
         'poll_seconds' => (int) env('ROBOT_COUNCIL_DASHBOARD_POLL_SECONDS', 5),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rate limits
+    |--------------------------------------------------------------------------
+    |
+    | Attempts per minute, each against the subject named by its key. The token
+    | endpoint is limited twice, because a helper polling every few seconds is
+    | ordinary traffic while thousands of device codes from one address are not.
+    |
+    */
 
     'rate_limits' => [
         'device_code_per_ip' => (int) env('ROBOT_COUNCIL_RATE_DEVICE_CODE_PER_IP', 10),

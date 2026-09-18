@@ -12,7 +12,6 @@ declare(strict_types=1);
  */
 
 use Illuminate\Support\Facades\Route;
-use RobotCouncil\Http\Controllers\DashboardStylesheetController;
 use RobotCouncil\Http\Controllers\EnrollmentDecisionController;
 use RobotCouncil\Http\Controllers\EnrollmentPageController;
 use RobotCouncil\Http\Controllers\GitHubCallbackController;
@@ -24,12 +23,6 @@ use RobotCouncil\RobotCouncilServiceProvider;
 
 Route::get('auth/github/redirect', GitHubRedirectController::class)->name('auth.redirect');
 Route::get('auth/github/callback', GitHubCallbackController::class)->name('auth.callback');
-
-// Public, and deliberately outside the group below. It is a stylesheet compiled from this package's
-// own sources: it holds nothing a signed-in developer would not already see, and a page that needed
-// authentication to load its own styling would render unstyled to exactly the people being told to
-// sign in. Served rather than published so the file that ships is the file that renders.
-Route::get('dashboard.css', DashboardStylesheetController::class)->name('dashboard.stylesheet');
 
 Route::middleware([EnsureAllowlistedDeveloper::class, DenyFraming::class])->group(function (): void {
     Route::get('enroll', EnrollmentPageController::class)->name('enroll.show');

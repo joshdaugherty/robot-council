@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace RobotCouncil\Support;
 
 use Illuminate\Contracts\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
+use Illuminate\Database\Query\JoinClause;
+use Illuminate\Support\Facades\DB;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\FleetEvent;
 use RobotCouncil\Models\FleetEventType;
@@ -26,6 +29,21 @@ final class FleetFeed
      * The most events one read returns, whatever the caller asks for.
      */
     public const int MAX_PAGE = 200;
+
+    /**
+     * The most event ids one read may examine, whatever it finds among them.
+     *
+     * **This is what keeps one call's cost independent of the fleet's traffic.** The read walks
+     * forward from a cursor through ids it may not be allowed to see, and without a ceiling a
+     * reader whose developers are quiet would scan further the busier everyone else is -- which any
+     * holder of `events:post` could arrange for the whole fleet.
+     *
+     * A thousand, because the page has to be reachable. robot-council/core#62 measured a reader
+     * holding 5% of a million-event feed seeing 65 of every 200 ids -- roughly a third, since state
+     * changes and directives reach everyone -- so filling a 200-row page needs about 600 ids
+     * examined. A cap at the page size is what produced the four round trips this replaces.
+     */
+    public const int EXAMINE_CAP = 1000;
 
     /**
      * @param  AgentLogins  $logins  Who each session belongs to, as the fleet reads provenance.
@@ -50,24 +68,84 @@ final class FleetFeed
      */
     public function after(AgentSession $reader, int $after, int $limit): array
     {
-        $window = FleetEvent::query()
+        $page = max(1, min($limit, self::MAX_PAGE));
+
+        $examined = $this->examinedWindow($after);
+
+        // **One statement, and the join is what makes the empty page work.** The marker is a
+        // single row carrying how far the window reached, and the visible events hang off it by a
+        // left join -- so a reader with nothing visible in a long run of other developers'
+        // narration still gets a row back saying where the read stopped, and its cursor moves.
+        // Carrying that figure on the event rows instead would lose it in exactly the case it
+        // exists for, because there are no event rows then.
+        $rows = DB::query()
+            ->fromSub(
+                DB::query()->fromSub($examined, 'counted')->selectRaw('max(counted.id) as examined_to'),
+                'marker'
+            )
+            ->leftJoinSub(
+                $this->visibleWithin($examined, $reader, $page),
+                'visible',
+                // A cross join written as a left join, because a cross join with nothing on the
+                // right returns nothing, which is the row this needs most
+                fn (JoinClause $join): JoinClause => $join->on(DB::raw('1'), '=', DB::raw('1'))
+            )
+            ->select('marker.examined_to', 'visible.*')
+            ->orderBy('visible.id')
+            ->get();
+
+        $first = $rows->first();
+
+        // `?? null` rather than a `property_exists` guard: the row is a `stdClass`, which the
+        // analyzer treats as carrying any property, so the guard is reported as dead code
+        $reached = $first !== null && is_numeric($first->examined_to ?? null)
+            ? (int) $first->examined_to
+            : null;
+
+        // The marker row carries a null `id` when nothing in the window was visible, which is the
+        // row that exists so the cursor can still move. It is not an event and is dropped here.
+        $found = $rows
+            ->filter(fn (object $row): bool => ($row->id ?? null) !== null)
+            ->map(fn (object $row): array => (array) $row)
+            ->values();
+
+        $events = FleetEvent::hydrate($found->all());
+
+        $logins = $this->logins->forUsers($events->pluck('user_id')->all());
+
+        /** @var list<array<string, mixed>> $described */
+        $described = $events->map(fn (FleetEvent $event): array => $this->describe($event, $logins))->values()->all();
+
+        return ['events' => $described, 'cursor' => $this->cursor($described, $page, $reached, $after)];
+    }
+
+    /**
+     * The ids this read is allowed to look at: everything after the cursor, up to the cap.
+     *
+     * @param  int  $after  The last event ID the reader has already seen.
+     * @return QueryBuilder The capped window.
+     */
+    private function examinedWindow(int $after): QueryBuilder
+    {
+        return DB::table(new FleetEvent()->getTable())
             ->where('id', '>', $after)
             ->orderBy('id')
-            ->limit(max(1, min($limit, self::MAX_PAGE)))
-            ->pluck('id');
+            ->limit(self::EXAMINE_CAP);
+    }
 
-        if ($window->isEmpty()) {
-            return ['events' => [], 'cursor' => $after];
-        }
-
-        // Everything up to here has been examined, whether or not this reader may see it
-        $highest = $window->max();
-
-        $cursor = \is_int($highest) ? $highest : (int) (\is_numeric($highest) ? $highest : $after);
-
-        $events = FleetEvent::query()
-            ->whereKey($window->all())
-            ->where(function (Builder $query) use ($reader): void {
+    /**
+     * The events inside that window this reader may see, up to one page of them.
+     *
+     * @param  QueryBuilder  $examined  The capped window.
+     * @param  AgentSession  $reader  The session doing the reading.
+     * @param  int  $page  How many visible events to return.
+     * @return QueryBuilder The page.
+     */
+    private function visibleWithin(QueryBuilder $examined, AgentSession $reader, int $page): QueryBuilder
+    {
+        return DB::query()
+            ->fromSub($examined, 'window')
+            ->where(function (QueryBuilder $query) use ($reader): void {
                 // Everything that is not narration, plus the narration this reader may see
                 // Asked of the enum rather than hardcoded, so a later restricted type is
                 // restricted by declaring itself so rather than by somebody remembering to edit
@@ -84,14 +162,41 @@ final class FleetFeed
                     ->orWhere('user_id', $reader->user_id);
             })
             ->orderBy('id')
-            ->get();
+            ->limit($page);
+    }
 
-        $logins = $this->logins->forUsers($events->pluck('user_id')->all());
+    /**
+     * How far this read got, which is what the reader asks from next time.
+     *
+     * **A full page stops at its last row, and a short one stops at the cap.** When the page filled,
+     * the window may still hold visible events above the last one returned, so the cursor cannot
+     * claim them; when it did not, every id up to the cap was examined and decided, so the cursor
+     * takes all of them. Reporting the last returned id in both cases is the bug this reshape
+     * exists to remove, and it would be invisible -- the events returned would be identical, and
+     * only the poll after the next one would show the reader rescanning a tail it cannot see.
+     *
+     * @param  list<array<string, mixed>>  $described  The events being returned.
+     * @param  int  $page  The page size that was asked for.
+     * @param  int|null  $reached  The highest id examined, or null when the feed had nothing after
+     *                             the cursor.
+     * @param  int  $after  Where the read started.
+     * @return int Where to read from next.
+     */
+    private function cursor(array $described, int $page, ?int $reached, int $after): int
+    {
+        if ($reached === null) {
+            // Nothing at all after the cursor: a reader that is caught up keeps its place rather
+            // than being sent back to the start
+            return $after;
+        }
 
-        /** @var list<array<string, mixed>> $described */
-        $described = $events->map(fn (FleetEvent $event): array => $this->describe($event, $logins))->values()->all();
+        if (\count($described) < $page) {
+            return $reached;
+        }
 
-        return ['events' => $described, 'cursor' => $cursor];
+        $last = $described[\count($described) - 1]['id'] ?? null;
+
+        return \is_int($last) ? $last : $reached;
     }
 
     /**

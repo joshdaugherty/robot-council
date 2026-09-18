@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
 use Laravel\Mcp\Facades\Mcp;
+use Laravel\Mcp\Server\Middleware\ReorderJsonAccept;
 use RobotCouncil\Access\Allowlist;
 use RobotCouncil\Access\ApiGuards;
 use RobotCouncil\Access\Guard;
@@ -285,10 +286,21 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
      * It also orders the pipeline the right way round. The group's middleware merges *ahead* of the
      * transport's own, so the limiter and the guard run before `ValidateMcpHeaders` decodes the
      * body, and an unauthenticated caller no longer costs the host a JSON parse of up to
-     * `post_max_size`. Nothing is lost by moving `AddWwwAuthenticateHeader` inward: it decorates a
-     * 401 it receives as a *response*, and `EnsureAgentSession` throws `UnauthorizedHttpException`,
-     * which carries the `Bearer` challenge itself and unwinds past every inner middleware to the
-     * host's exception handler.
+     * `post_max_size`.
+     *
+     * **`ReorderJsonAccept` is named here as well**, because that reordering has to happen before
+     * anything can refuse the request. The transport specification asks a client to accept both
+     * `application/json` and `text/event-stream` and does not fix their order, while
+     * `Request::wantsJson()` reads only the first acceptable type -- so a client listing
+     * `text/event-stream` first would take the guard's 401 and the limiter's 429 as an HTML error
+     * page. It is idempotent, so running again inside the transport's own stack costs nothing.
+     *
+     * What does move inward is `AddWwwAuthenticateHeader`, and it costs the `realm="mcp"` and
+     * `error="invalid_token"` detail on a guard 401. `Illuminate\Pipeline\Pipeline::carry()` wraps
+     * each pipe in its own try/catch and renders the exception where it was thrown, so that
+     * middleware did previously receive the guard's 401 as a response and decorate it. The refusal
+     * still carries `WWW-Authenticate: Bearer` from `UnauthorizedHttpException`, and no OAuth
+     * resource-metadata route exists for the fuller form to point at.
      *
      * `mcp:inspector` does not list this server while a host has cached its routes, because Laravel
      * skips a package's route files then and this registration runs inside that same guard.
@@ -300,8 +312,11 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
     {
         $uri = trim($prefix, '/').'/mcp';
 
+        // `$middleware` has already been reduced to usable strings by `routeMiddleware()`, so this
+        // route and the REST routes receive exactly the same list
         Route::middleware([
             ...array_values($middleware),
+            ReorderJsonAccept::class,
             'throttle:'.self::AGENT_LIMITER,
             EnsureAgentSession::class,
         ])->group(function () use ($uri): void {
@@ -342,13 +357,30 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
     {
         $value = $config->get('robot-council.routes.'.$key, $default);
 
-        if (\is_array($value)) {
-            return $value;
+        if (! \is_array($value)) {
+            Log::warning(sprintf('robot-council: `robot-council.routes.%s` must be an array; using the package default.', $key));
+
+            return $default;
         }
 
-        Log::warning(sprintf('robot-council: `robot-council.routes.%s` must be an array; using the package default.', $key));
+        // Every entry has to survive being cast to a string, because that is what the router does
+        // with it: `Route::middleware()` and `RouteRegistrar::attribute()` both force `(string)`
+        // over each one. A closure raises `Object of class Closure could not be converted to
+        // string` and an array raises a warning and stores the literal `Array`, and this runs
+        // inside `packageBooted()` -- so a host that put the wrong shape in its config would take
+        // down every request and every artisan command, including the `config:clear` that would
+        // undo it.
+        $usable = array_values(array_filter($value, \is_string(...)));
 
-        return $default;
+        if (\count($usable) !== \count($value)) {
+            Log::warning(sprintf(
+                'robot-council: `robot-council.routes.%s` must hold middleware names as strings; ignoring %d entry that is not one.',
+                $key,
+                \count($value) - \count($usable),
+            ));
+        }
+
+        return $usable;
     }
 
     /**

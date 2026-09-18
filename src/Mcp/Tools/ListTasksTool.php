@@ -14,6 +14,7 @@ use Laravel\Mcp\Server\Tool;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Mcp\ActsAsAgent;
 use RobotCouncil\Mcp\Arguments;
+use RobotCouncil\Models\Task;
 use RobotCouncil\Models\TaskStatus;
 use RobotCouncil\Support\TaskList;
 
@@ -85,7 +86,7 @@ final class ListTasksTool extends Tool
         $request->validate([
             'status' => ['sometimes', 'string', Rule::enum(TaskStatus::class)],
             'limit' => ['sometimes', 'integer', 'min:1', 'max:'.TaskList::MAX_PAGE],
-            'after_priority' => ['nullable', 'required_with:after_id', 'integer', 'min:0'],
+            'after_priority' => ['nullable', 'required_with:after_id', 'integer', 'between:0,'.Task::MAX_PRIORITY],
             'after_id' => ['nullable', 'required_with:after_priority', 'integer', 'min:1'],
         ]);
 

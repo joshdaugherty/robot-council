@@ -27,15 +27,20 @@ final class Arguments
      */
     public static function integer(mixed $value): int
     {
-        if (\is_int($value)) {
-            return $value;
+        // `filter_var` rather than `is_int` plus `ctype_digit`, because Laravel's `integer` rule is
+        // `filter_var($value, FILTER_VALIDATE_INT) !== false` and the two sets are not nested: a
+        // JSON `12.0` decodes to a float, and `" 12"`, `"12 "`, `"+12"` and `true` all satisfy the
+        // rule. Narrower here, every one of those passed its tool's validation and then threw --
+        // and a throw out of a tool is reported to the host's log and returned as an internal
+        // error, which is the thing validating the arguments was meant to stop. Matching the rule
+        // exactly is what makes the seam closed by construction rather than by agreement.
+        $integer = filter_var($value, FILTER_VALIDATE_INT);
+
+        if ($integer === false) {
+            throw new RuntimeException(sprintf('Expected a whole number, got %s.', get_debug_type($value)));
         }
 
-        if (\is_string($value) && ctype_digit($value)) {
-            return (int) $value;
-        }
-
-        throw new RuntimeException(sprintf('Expected a whole number, got %s.', get_debug_type($value)));
+        return $integer;
     }
 
     /**

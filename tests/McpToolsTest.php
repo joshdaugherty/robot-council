@@ -406,11 +406,21 @@ it('refuses through a tool exactly what the REST endpoint refuses', function (st
         $arguments
     );
 
+    // Asserted on the log rather than only on the message, because `InteractsWithResponses`
+    // returns the exception's own text when `app.debug` is on -- under which a bare comparison
+    // against the generic string passes for a tool that threw. `report()` runs either way.
+    $reported = [];
+
+    Log::listen(static function (MessageLogged $entry) use (&$reported): void {
+        $reported[] = $entry->message;
+    });
+
     $error = toolError(callTool($this, $this->token, $tool, $arguments));
 
     // The generic text `ToolInvoker` returns for an uncaught exception, after reporting it to the
     // host's log. A refusal names what was wrong; this text means the tool threw
-    expect($error)->not->toBe('An internal server error occurred.');
+    expect($error)->not->toBe('An internal server error occurred.')
+        ->and($reported)->toBeEmpty();
 })->with([
     // Unbounded structure. `payload` and `result` are `json` columns nothing prunes, and a full
     // page of the task list returns up to a hundred rows with their content
@@ -550,4 +560,96 @@ it('never puts a credential in a tool result or in the host log', function (): v
     // tokens could never appear in, would pass every assertion above while proving nothing
     expect($transcript)->toContain('"task_id"')
         ->and($transcript.$this->token)->toContain($this->token);
+});
+
+it('takes a whole number however JSON spelled it, and refuses one that is not whole', function (): void {
+    $taskId = intValue(toolResult(callTool($this, $this->token, 'task_create', ['title' => 'Spelled']))['task_id']);
+
+    // Sent as raw JSON rather than through `postJson`, because `json_encode(12.0)` emits `12` --
+    // PHP drops the fractional zero, so a test that passes a PHP float sends an integer and never
+    // reaches the seam this covers. A client writing the literal `12.0` does send a float, and
+    // `json_decode` hands the tool `float(12)`.
+    $call = static fn (string $tool, string $rawId): array => [
+        'jsonrpc' => '2.0',
+        'id' => 1,
+        'method' => 'tools/call',
+        'params' => ['name' => $tool, 'arguments' => ['task_id' => $rawId]],
+    ];
+
+    // Put the unquoted number back where `json_encode` would have normalized it away
+    $raw = static fn (array $envelope, string $rawId): string => str_replace(
+        '"task_id":"'.$rawId.'"',
+        '"task_id":'.$rawId,
+        (string) json_encode($envelope)
+    );
+
+    // `call()` is the only helper that sends a body verbatim, and it does not apply the default
+    // headers the verb methods do, so the credential goes on as a server variable
+    $post = fn (string $body): array => arrayValue($this->machine($this->token)->call(
+        'POST',
+        MCP_URL,
+        [],
+        [],
+        [],
+        [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_ACCEPT' => 'application/json',
+            'HTTP_AUTHORIZATION' => 'Bearer '.$this->token,
+        ],
+        $body
+    )->json());
+
+    // Laravel's `integer` rule accepts a float carrying a whole number, and `Arguments::integer()`
+    // used to reject it -- so the argument passed validation and then threw, which `ToolInvoker`
+    // reports to the host's log before answering with a generic internal error
+    $whole = $taskId.'.0';
+
+    $claimed = toolResult($post($raw($call('task_claim', $whole), $whole)));
+
+    expect($claimed['task_id'])->toBe($taskId);
+
+    // And one that is genuinely not a whole number is a refusal naming the field, not a throw.
+    // Laravel humanizes the attribute, so the message names `task id`
+    $fractional = $taskId.'.5';
+
+    $error = toolError($post($raw($call('task_start', $fractional), $fractional)));
+
+    expect($error)->toContain('task id')
+        ->and($error)->not->toBe('An internal server error occurred.');
+});
+
+it('answers a refusal in JSON whichever order the client listed its accepted types', function (string $accept): void {
+    // The transport specification asks a client to accept both `application/json` and
+    // `text/event-stream` and fixes no order, while `Request::wantsJson()` reads only the first
+    // acceptable type. `ReorderJsonAccept` exists to normalize that, so it has to run before
+    // anything can refuse the request -- ahead of the guard and the limiter, not behind them.
+    $response = $this->machine('not-a-token')
+        ->withHeaders(['Accept' => $accept, 'Content-Type' => 'application/json'])
+        ->post(MCP_URL, ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list']);
+
+    $response->assertStatus(401);
+
+    expect($response->headers->get('Content-Type'))->toContain('json');
+})->with([
+    'json first' => 'application/json, text/event-stream',
+    'the event stream first' => 'text/event-stream, application/json',
+]);
+
+it('limits the MCP route per session, and limits an unauthenticated flood by address', function (): void {
+    // The MCP group's middleware is declared in `RobotCouncilServiceProvider::registerMcpServer()`
+    // rather than in `routes/api.php`, so the flood test covering the REST groups leaves this one
+    // unguarded: reverting only this group's order left the whole suite green.
+    config()->set('robot-council.rate_limits.agent_per_session', 2);
+
+    for ($refused = 0; $refused < 2; $refused++) {
+        $this->machine('not-a-token')->postJson(MCP_URL, ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list'])
+            ->assertStatus(401);
+    }
+
+    $this->machine('not-a-token')->postJson(MCP_URL, ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list'])
+        ->assertStatus(429);
+
+    // And a session that authenticates is limited on its own key, not the address
+    $this->machine($this->token)->postJson(MCP_URL, ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list'])
+        ->assertOk();
 });

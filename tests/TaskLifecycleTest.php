@@ -27,7 +27,9 @@ use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Models\Task;
 use RobotCouncil\Models\TaskStatus;
 use RobotCouncil\Models\TaskTransition;
+use RobotCouncil\Support\AgentSessions;
 use RobotCouncil\Support\Outcome;
+use RobotCouncil\Support\ProjectId;
 use RobotCouncil\Support\SessionPresence;
 use RobotCouncil\Support\TaskList;
 use RobotCouncil\Support\Tasks;
@@ -1384,4 +1386,97 @@ it('indexes the queue for both the filtered and the unfiltered listing', functio
 
         // And an index nobody asked for, so `not->toContain` is shown to be capable of failing
         ->and($indexes)->not->toContain(['queue_rank', 'status']);
+});
+
+it('refuses text and identifiers the package will not store, through the store not the endpoint', function (): void {
+    // #57: the column is not the bound. A `varchar` is refused past its length by Postgres and
+    // MySQL and stored whole by SQLite, and its width is the HOST's anyway -- `string('title')`
+    // takes `Schema::$defaultStringLength`, a public static a host may lower. So the migrations pin
+    // these columns and `Tasks::create()` holds the bound.
+    //
+    // Written through the store on purpose. Both endpoints validate this, so an endpoint test would
+    // exercise the validator rather than the guarantee that has to hold when nobody validated.
+    $tasks = $this->service(Tasks::class);
+
+    // Counted rather than inferred from the row count. `create()` wraps its insert in a
+    // transaction, so a guard moved INSIDE that transaction would roll the insert back and leave
+    // the table empty too -- the count gives the same answer for both arrangements and cannot tell
+    // apart the two things it would be asked to choose between.
+    $inserts = 0;
+
+    DB::listen(function (QueryExecuted $query) use (&$inserts): void {
+        if (str_contains(strtolower($query->sql), 'insert into') && str_contains($query->sql, 'robot_council_tasks')) {
+            $inserts++;
+        }
+    });
+
+    $refusals = [
+        'an over-length title' => ['title' => str_repeat('a', Task::MAX_TITLE + 1)],
+        'an over-length description' => ['title' => 'Fine', 'description' => str_repeat('b', Task::MAX_DESCRIPTION + 1)],
+        'an over-length project id' => ['title' => 'Fine', 'project_id' => str_repeat('c', ProjectId::MAX + 1)],
+
+        // Charset as well as length, because this one does not stay behind `TaskList`'s visibility
+        // rule: `create()` puts it in the feed's `meta`, which every session in the fleet reads
+        'a project id with a space' => ['title' => 'Fine', 'project_id' => 'two words'],
+        'a project id with a newline' => ['title' => 'Fine', 'project_id' => "ok\n"],
+        'a project id with markup' => ['title' => 'Fine', 'project_id' => '<script>'],
+    ];
+
+    foreach ($refusals as $what => $attributes) {
+        expect(fn (): Task => $tasks->create($this->session, $attributes, withCoordinator: false))
+            ->toThrow(InvalidArgumentException::class, message: $what.' should be refused');
+    }
+
+    // Nothing was even attempted, so the refusal is before the insert rather than a rollback after
+    expect($inserts)->toBe(0);
+
+    // The control: at the limit, and with a project id shaped the way the endpoints allow, the same
+    // call succeeds -- so the refusals above are the bounds firing rather than the store refusing
+    // everything
+    $atLimit = $tasks->create(
+        $this->session,
+        [
+            'title' => str_repeat('a', Task::MAX_TITLE),
+            'description' => str_repeat('b', Task::MAX_DESCRIPTION),
+            'project_id' => str_repeat('c', ProjectId::MAX),
+        ],
+        withCoordinator: false,
+    );
+
+    expect($inserts)->toBe(1);
+
+    // Read back from the row rather than from the instance that wrote it. The instance would report
+    // whatever PHP handed in, whether or not the column could hold it.
+    $stored = Task::query()->whereKey($atLimit->id)->sole();
+
+    expect($stored->title)->toHaveLength(Task::MAX_TITLE)
+        ->and($stored->description)->toHaveLength(Task::MAX_DESCRIPTION)
+        ->and($stored->project_id)->toHaveLength(ProjectId::MAX);
+
+    // And the bound is characters rather than bytes, the same unit the endpoints' `max:` rule uses,
+    // so the store and the edge refuse the same values rather than nearly the same ones. If the
+    // guard counted bytes this string would be 510 and the create below would throw.
+    $multibyte = str_repeat('é', Task::MAX_TITLE);
+
+    expect($multibyte)->toHaveLength(Task::MAX_TITLE)
+        ->and(\strlen($multibyte))->toBeGreaterThan(Task::MAX_TITLE);
+
+    $accented = $tasks->create($this->session, ['title' => $multibyte], withCoordinator: false);
+
+    expect(Task::query()->whereKey($accented->id)->sole()->title)->toHaveLength(Task::MAX_TITLE);
+});
+
+it('bounds a project id on the session store too, which writes the same column', function (): void {
+    // `robot_council_agent_sessions.project_id` is the second table holding this value, and
+    // `AgentSessions::start()` is as directly callable as `Tasks::create()`.
+    $installation = $this->approveInstallation($this->developer, [Ability::TasksCreate->value], machineLabel: 'second');
+
+    expect(fn (): object => $this->service(AgentSessions::class)
+        ->start($installation, str_repeat('z', ProjectId::MAX + 1)))
+        ->toThrow(InvalidArgumentException::class);
+
+    // The control: a project id inside the bound starts a session, so the refusal is the bound
+    $issued = $this->service(AgentSessions::class)->start($installation, 'robot-council/core');
+
+    expect($issued->owner->getKey())->toBeInt();
 });

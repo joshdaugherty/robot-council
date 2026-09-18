@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use RobotCouncil\Support\ProjectId;
 
 /**
  * Creates the table holding one running agent process. A session is what a bearer token
@@ -46,7 +47,7 @@ return new class extends Migration
             $table->dateTime('last_seen_at');
 
             // Which repository or workspace the process is working in, when it says
-            $table->string('project_id')->nullable();
+            $table->string('project_id', ProjectId::MAX)->nullable();
 
             $table->timestamps();
 

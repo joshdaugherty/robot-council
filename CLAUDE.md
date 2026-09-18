@@ -122,6 +122,27 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
   `postgres` job runs the same files. Better still, write the test so it does not depend on
   enforcement at all: the one that shipped forces the state it is about rather than asking the engine
   to produce it.
+- **A bound a validation rule states is not a bound the package holds.** Every store here is a
+  public method on a `final` class a host can resolve and call, and the create paths spread what
+  they are given straight into an insert -- so a rule in a controller protects the endpoint and
+  nothing else. The column does not close the gap, because the column means something different on
+  each engine: measured for #57, `unsignedTinyInteger` is `tinyint unsigned` on MySQL (0-255,
+  an error in strict mode and a clamp otherwise), `smallint` on Postgres (signed, because it has no
+  unsigned integers), and an unbounded `integer` on SQLite; `string()` is refused past its length by
+  Postgres and MySQL and stored whole by SQLite. One call, three outcomes. **The settled pattern:
+  an ordinal clamps and content refuses.** `Models\Task`'s `priority` mutator clamps, because 10
+  and 9 both mean "as urgent as can be"; `Support\Tasks::create()` throws for an over-length
+  `title` or `description`, because shortening content changes what it says, silently, in a field
+  other developers' agents read -- and two engines already refuse it, so throwing makes the third
+  agree rather than inventing a behavior. A test for either writes through the store, never through
+  the endpoint, or it tests the validator instead of the guarantee, and it asserts on the ROW rather
+  than on the instance the store returned, which reports whatever PHP handed in.
+  **The pattern is applied to `Locks`, `Tasks` and `AgentSessions`; the other five stores are #91.**
+  Two related traps: a `string()` with no length takes `Schema::$defaultStringLength`, a public
+  static the HOST may lower, so every column here declares its own; and `Support\ProjectId` holds
+  one bound for the two tables that store a project id, because it is the field that leaves
+  `TaskList`'s visibility rule -- `Tasks::create()` puts it in the feed's `meta`, which every session
+  reads.
 - **SQLite does not enforce a `varchar` length and Postgres does**, so a fixture that writes an
   overlong value passes every local run and fails only in the `postgres` job. `$table->string('x', 32)`
   is a hard limit there: Postgres answers `SQLSTATE[22001] value too long for type character

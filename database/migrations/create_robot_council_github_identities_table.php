@@ -32,8 +32,8 @@ return new class extends Migration
             $table->unsignedBigInteger('github_id')->unique();
 
             // What the account looked like at the last sign-in, for display only
-            $table->string('github_login');
-            $table->string('avatar_url')->nullable();
+            $table->string('github_login', 255);
+            $table->string('avatar_url', 255)->nullable();
 
             $table->timestamps();
         });

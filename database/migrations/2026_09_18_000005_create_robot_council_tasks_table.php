@@ -6,6 +6,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use RobotCouncil\Models\Task;
+use RobotCouncil\Support\ProjectId;
 
 /**
  * Creates the table holding the unit of work agents hand each other.
@@ -32,7 +33,16 @@ return new class extends Migration
                 ->constrained('robot_council_tasks')
                 ->nullOnDelete();
 
-            $table->string('title');
+            // **The length here is not what enforces the length.** Postgres and MySQL refuse to
+            // overrun a `varchar`, and SQLite stores the value whole -- so one over-length write is
+            // a 500 on two engines and a silently too-long title on the third, in a field other
+            // developers' agents read. `Support\Tasks::create()` refuses it before any engine sees
+            // it, which is what makes the bound mean the same thing everywhere. Both endpoints
+            // validate it too; the store is what a host reaches directly. (#57)
+            $table->string('title', Task::MAX_TITLE);
+            // A `text` column, which holds far more than `Task::MAX_DESCRIPTION`. That bound is
+            // policy rather than capacity -- like a title, a description reaches other developers'
+            // agents -- and `Support\Tasks::create()` is what holds it.
             $table->text('description')->nullable();
 
             $table->string('status', 16);
@@ -40,6 +50,13 @@ return new class extends Migration
             // Higher is more urgent. A small range rather than an open integer, because it is
             // sorted on and a client that sends the largest integer it can would otherwise pin
             // itself to the top of every other developer's queue.
+            //
+            // **What holds that range is `Models\Task`'s mutator, not this column.** Measured for
+            // #57: `unsignedTinyInteger` is `tinyint unsigned` on MySQL (0-255, an error in strict
+            // mode and a clamp otherwise), `smallint` on Postgres (-32768 to 32767, because it has
+            // no unsigned integers), and an unbounded `integer` on SQLite. One out-of-range call
+            // therefore had three outcomes. The mutator clamps to 0..MAX_PRIORITY in PHP, which is
+            // the only place all three agree.
             $table->unsignedTinyInteger('priority')->default(0);
 
             // The same urgency, ascending, so one index serves both the ordering and the cursor.
@@ -89,7 +106,11 @@ return new class extends Migration
             $table->boolean('created_with_coordinator')->default(false);
 
             // Which repository or workspace the task belongs to, when the creator says
-            $table->string('project_id')->nullable();
+            // Pinned, like every other string column here: an unpinned `string()` takes its length
+            // from `Schema::$defaultStringLength`, which the host owns. `Support\ProjectId` holds
+            // the bound and the charset, because this value reaches the whole fleet through the
+            // feed's `meta` rather than staying behind `TaskList`'s visibility rule.
+            $table->string('project_id', ProjectId::MAX)->nullable();
 
             $table->timestamps();
 

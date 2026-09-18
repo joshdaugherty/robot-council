@@ -9,6 +9,7 @@ use Illuminate\Support\Carbon;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use Livewire\Component;
+use RobotCouncil\Models\Task;
 use RobotCouncil\Models\TaskStatus;
 use RobotCouncil\Support\TaskList;
 
@@ -59,10 +60,15 @@ final class TaskBoard extends Component
      *
      * Locked with its partner, which stops the `updates` map from writing them. It does **not** stop
      * `showNext()` below, which is a public action and is how the rendered button moves the cursor:
-     * a client may call it with any pair it likes. That is deliberate and costs nothing, because the
-     * reader may already see every task and `priority` is a `unsignedTinyInteger` -- an out-of-range
-     * cursor returns rows they could have paged to anyway. What locking buys is that the cursor is
-     * not silently rewritten underneath a render.
+     * a client may call it with any pair it likes. That is deliberate, because the reader may
+     * already see every task -- #73 decided a signed-in developer sees the whole fleet -- so a
+     * cursor they made up reaches nothing they could not have paged to. What locking buys is that
+     * the cursor is not silently rewritten underneath a render.
+     *
+     * It is bounded all the same, because the pair no longer reaches a comparison with the column
+     * directly: `TaskList` converts it through `MAX_PRIORITY - $priority` first, and an unbounded
+     * `int` from the client overflows that subtraction to a float. Unlike the two API paths, this
+     * action carries no `between:0,9`, so it does its own.
      */
     #[Locked]
     public ?int $afterId = null;
@@ -91,8 +97,8 @@ final class TaskBoard extends Component
      */
     public function showNext(int $priority, int $id): void
     {
-        $this->afterPriority = $priority;
-        $this->afterId = $id;
+        $this->afterPriority = max(0, min(Task::MAX_PRIORITY, $priority));
+        $this->afterId = max(0, $id);
     }
 
     /**

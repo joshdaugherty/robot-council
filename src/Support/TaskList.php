@@ -147,21 +147,34 @@ final class TaskList
         return Task::query()
             ->when($status instanceof TaskStatus, fn (Builder $query) => $query->where('status', $status?->value))
             ->when($after !== null, function (Builder $query) use ($after): void {
-                $priority = $after['priority'] ?? 0;
-                $id = $after['id'] ?? 0;
+                $priority = \is_int($after['priority'] ?? null) ? $after['priority'] : 0;
+                $id = \is_int($after['id'] ?? null) ? $after['id'] : 0;
 
-                // The keyset predicate for `priority` descending, `id` ascending: everything less
-                // urgent, plus everything of equal urgency filed later
-                $query->where(fn (Builder $page) => $page
-                    ->where('priority', '<', $priority)
-                    ->orWhere(fn (Builder $tie) => $tie
-                        ->where('priority', $priority)
-                        ->where('id', '>', $id)));
+                // The cursor arrives in the client's vocabulary and is converted here. Nothing
+                // outside this class knows `queue_rank` exists, which is what lets the ordering
+                // change without the wire format changing.
+                $rank = Task::MAX_PRIORITY - $priority;
+
+                // A row-value comparison rather than the `rank > ? or (rank = ? and id > ?)`
+                // disjunction it replaces. Both express the same keyset, but a disjunction is the
+                // shape planners handle worst, while `(a, b) > (?, ?)` is a range seek down an
+                // index whose columns all ascend.
+                //
+                // **Syntax support and optimization are different questions.** Row values parse on
+                // SQLite since 3.15 (2016), and on Postgres and MySQL throughout. That the planner
+                // turns one into a seek is measured HERE ON SQLITE ONLY. MySQL gained range-scan
+                // support for row constructors in 5.7.3, and its documented example is a bare
+                // `(a, b) > (?, ?)` rather than the leading equality this shape has, so even a
+                // modern MySQL wants measuring; that is #39. MariaDB is a separate question again.
+                $query->whereRaw('(queue_rank, id) > (?, ?)', [$rank, $id]);
             })
 
             // The queue's order: the most urgent first, and among equals the oldest, so a task
-            // nobody claims does not sink under everything filed after it
-            ->orderByDesc('priority')
+            // nobody claims does not sink under everything filed after it. Both columns ascend, so
+            // an index can be walked rather than sorted -- which `priority desc, id asc` could not
+            // be, in either scan direction. Which index depends on whether `status` was given, and
+            // the table carries one for each shape; the migration records the plans.
+            ->orderBy('queue_rank')
             ->orderBy('id')
             ->limit(max(1, min($limit, self::MAX_PAGE)))
             ->get();

@@ -90,6 +90,15 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
   validation on purpose -- which is how the escaping guards prove the page rather than the validator
   -- has no rule to keep it inside the column, so it has to assert the bound itself.
 
+- **Never copy files aside into a flat scratch directory when two of them share a basename.** The
+  package has `src/Support/FleetPresence.php` and `src/Livewire/FleetPresence.php`, and
+  `cp <both> "$SCRATCH/"` leaves one file holding the other's contents. Restoring then writes the
+  wrong class back, `php -l` passes because both are valid PHP, and the tests keep passing because
+  the surviving copy is the one they exercise. Measured while mutation-controlling #75: the Livewire
+  component was overwritten by the store, and only a `grep` for a string unique to the component
+  caught it. Name the copy after its path (`livewire-FleetPresence.php`), and verify a restore by
+  content rather than by the `cp` having exited 0.
+
 - **Restoring a Blade view does not undo it: the compiled view wins on mtime.** Blade recompiles only
   when the source is newer than its cache under
   `vendor/orchestra/testbench-core/laravel/storage/framework/views/`, and a `cp` restore writes an

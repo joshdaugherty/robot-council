@@ -18,6 +18,7 @@ use RobotCouncil\Http\Controllers\GitHubCallbackController;
 use RobotCouncil\Http\Controllers\GitHubRedirectController;
 use RobotCouncil\Http\Middleware\DenyFraming;
 use RobotCouncil\Http\Middleware\EnsureAllowlistedDeveloper;
+use RobotCouncil\Livewire\Dashboard;
 use RobotCouncil\RobotCouncilServiceProvider;
 
 Route::get('auth/github/redirect', GitHubRedirectController::class)->name('auth.redirect');
@@ -25,6 +26,10 @@ Route::get('auth/github/callback', GitHubCallbackController::class)->name('auth.
 
 Route::middleware([EnsureAllowlistedDeveloper::class, DenyFraming::class])->group(function (): void {
     Route::get('enroll', EnrollmentPageController::class)->name('enroll.show');
+
+    // The dashboard. Behind the same allowlist gate and framing refusal as the verification page,
+    // because it displays the whole fleet's state to whoever reaches it.
+    Route::get('dashboard', Dashboard::class)->name('dashboard');
 
     Route::middleware('throttle:'.RobotCouncilServiceProvider::VERIFICATION_LIMITER)->group(function (): void {
         Route::post('enroll/approve', [EnrollmentDecisionController::class, 'approve'])->name('enroll.approve');

@@ -1,0 +1,21 @@
+/*
+ * The dashboard's stylesheet, compiled here and shipped built.
+ *
+ * A consuming application runs no asset build and needs no Node toolchain, which is the decision
+ * recorded on robot-council/core#30. Tailwind emits only the classes it finds by scanning source,
+ * so every directory holding markup this package renders has to be named below. Nothing under
+ * `vendor/` is scanned, and nothing needs to be: the package writes its own markup and takes only
+ * component classes from daisyUI, which is an npm plugin rather than a Composer dependency and so
+ * reaches no consuming application at all.
+ *
+ * `source(none)` is load-bearing. Without it Tailwind's automatic detection scans the whole project
+ * on top of whatever `@source` names, so anything anywhere that looks like a class name changes the
+ * shipped stylesheet -- a test asserting that `bg-red-500` is absent put `bg-red-500` into the
+ * artifact and failed on itself. With it, the directories below are the whole of what is scanned,
+ * and the build is a function of the markup rather than of the repository.
+ */
+@import "tailwindcss" source(none);
+@plugin "daisyui";
+
+@source "../views";
+@source "../../src";

@@ -13,6 +13,7 @@ use Laravel\Mcp\Server\McpServiceProvider;
 use Laravel\Sanctum\Sanctum;
 use Laravel\Sanctum\SanctumServiceProvider;
 use Laravel\Socialite\SocialiteServiceProvider;
+use Livewire\LivewireServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
 use ReflectionClass;
 use RobotCouncil\Access\Ability;
@@ -110,6 +111,11 @@ class TestCase extends Orchestra
             McpServiceProvider::class,
             SocialiteServiceProvider::class,
             SanctumServiceProvider::class,
+
+            // The dashboard's stack. A host discovers Livewire through Composer and Testbench does
+            // not, exactly as with Socialite above.
+            LivewireServiceProvider::class,
+
             RobotCouncilServiceProvider::class,
         ];
     }

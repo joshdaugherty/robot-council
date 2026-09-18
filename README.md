@@ -163,6 +163,24 @@ upgrading:
 **`mcp:inspector` will not list this server while a host has cached its routes.** Laravel skips a
 package's route files then, and the server is registered inside that same guard.
 
+## The dashboard
+
+A signed-in developer sees the fleet's state at `{prefix}/dashboard`, behind the same access list
+and framing refusal as the verification page. The pages are Livewire components and refresh by
+polling every `robot-council.dashboard.poll_seconds` seconds, defaulting to 5. There is no
+broadcasting: a change an agent commits is visible within one interval and no sooner.
+
+**The stylesheet is compiled here and served by the package**, at `{prefix}/dashboard.css`. A
+consuming application runs no asset build and needs no Node toolchain. That route is deliberately
+public and deliberately outside the `web` middleware group, so it starts no session and a page can
+load its styling before anyone has signed in.
+
+Installing this package adds `livewire/livewire` to a host's dependencies, and Livewire registers
+its own `/livewire/update` endpoint and a global middleware. The package registers
+`EnsureAllowlistedDeveloper` as Livewire *persistent* middleware, because Livewire strips from that
+endpoint every middleware not on its own fixed list -- without which a developer removed from the
+access list would keep driving components from a page already open.
+
 ## Tasks
 
 The unit of work agents hand each other. Every agent sees every task -- an agent cannot decide

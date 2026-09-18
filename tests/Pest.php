@@ -75,6 +75,48 @@ function phpSourcesIn(string $directory): array
 }
 
 /**
+ * One source file's code, with its comments removed.
+ *
+ * A check that searches source for a construct will otherwise report the prose written to explain
+ * that construct. This repository documents the constructs it forbids, at length and next to the
+ * code that forbids them, so that is not a hypothetical: the dashboard layout's own comment saying
+ * the package never builds an `Htmlable` was reported as a package that builds one.
+ *
+ * PHP is tokenized rather than pattern-stripped, because `token_get_all()` knows a `//` inside a
+ * string literal from one that opens a comment and no regex over the text does. Blade templates are
+ * stripped of `{{-- --}}`, which is what Blade itself removes before compiling.
+ *
+ * @param  string  $path  The file to read.
+ * @return string Its contents with comments removed.
+ */
+function sourceWithoutComments(string $path): string
+{
+    $contents = (string) file_get_contents($path);
+
+    if (str_ends_with(strtolower($path), '.blade.php')) {
+        return (string) (preg_replace('/\{\{--.*?--\}\}/s', '', $contents) ?? $contents);
+    }
+
+    $kept = '';
+
+    foreach (token_get_all($contents) as $token) {
+        if (\is_array($token)) {
+            if ($token[0] === T_COMMENT || $token[0] === T_DOC_COMMENT) {
+                continue;
+            }
+
+            $kept .= $token[1];
+
+            continue;
+        }
+
+        $kept .= $token;
+    }
+
+    return $kept;
+}
+
+/**
  * Every interpolation in a URL-bearing attribute that is not a server-derived URL.
  *
  * Escaping is no defense here, which is what makes this its own check. `htmlspecialchars` alters

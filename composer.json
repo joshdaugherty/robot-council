@@ -20,6 +20,7 @@
         "laravel/mcp": "^1.0",
         "laravel/sanctum": "^4.3.1",
         "laravel/socialite": "^5.31.0",
+        "livewire/livewire": "^4.2.0",
         "spatie/laravel-package-tools": "^1.93.2"
     },
     "require-dev": {

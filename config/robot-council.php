@@ -205,6 +205,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Dashboard
+    |--------------------------------------------------------------------------
+    |
+    | How often the dashboard's pages ask the server for fresh state. There is no
+    | broadcasting, so this interval is the whole of the fleet's liveness on screen:
+    | a change an agent commits is visible within one of these, and no sooner.
+    |
+    */
+
+    'dashboard' => [
+        'poll_seconds' => (int) env('ROBOT_COUNCIL_DASHBOARD_POLL_SECONDS', 5),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Rate limits
     |--------------------------------------------------------------------------
     |

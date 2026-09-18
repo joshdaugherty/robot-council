@@ -116,6 +116,52 @@ it('renders every value in the package views escaped', function (): void {
     expect($offenders)->toBeEmpty('Unescaped output in package views:'.PHP_EOL.implode(PHP_EOL, $offenders));
 });
 
+it('ignores a construct named in a comment, and still finds one that is used', function (): void {
+    // Stripping comments makes the check narrower, so it needs its own control: a detector that
+    // stripped too much would pass this file and every future one. Both halves are asserted.
+    $root = $this->temporaryDirectory('sources');
+
+    file_put_contents($root.'/Mentioned.php', <<<'PHP'
+        <?php
+        // This package never builds an HtmlString, and Str::markdown is refused.
+        /** Nor an Htmlable, nor ->toHtml(). */
+        final class Mentioned
+        {
+            public function safe(): string
+            {
+                return 'HtmlString appears here in a string literal, which is not a comment';
+            }
+        }
+        PHP);
+
+    file_put_contents($root.'/Uses.php', <<<'PHP'
+        <?php
+        use Illuminate\Support\HtmlString;
+        final class Uses
+        {
+            public function build(string $x): HtmlString
+            {
+                return new HtmlString($x);
+            }
+        }
+        PHP);
+
+    file_put_contents($root.'/mentions.blade.php', '{{-- Htmlable and Str::markdown are refused --}}<p>{{ $safe }}</p>');
+
+    $find = static fn (string $file): bool => str_contains(sourceWithoutComments($file), 'HtmlString')
+        || str_contains(sourceWithoutComments($file), 'Htmlable');
+
+    expect($find($root.'/Mentioned.php'))->toBeTrue()   // the string literal survives, correctly
+        ->and($find($root.'/Uses.php'))->toBeTrue()
+        ->and($find($root.'/mentions.blade.php'))->toBeFalse();
+
+    // And the comments really were removed, rather than the file being read whole
+    expect(sourceWithoutComments($root.'/Mentioned.php'))
+        ->not->toContain('never builds')
+        ->not->toContain('Nor an Htmlable')
+        ->toContain('string literal, which is not a comment');
+});
+
 it('never hands Blade a value that escapes itself', function (): void {
     // `e()` returns `$value->toHtml()` unescaped for anything `Htmlable` or
     // `DeferringDisplayableValue`, so `{{ $x }}` emits live markup for an `HtmlString` -- measured:
@@ -138,7 +184,9 @@ it('never hands Blade a value that escapes itself', function (): void {
     $offenders = [];
 
     foreach ($sources as $source) {
-        $contents = (string) file_get_contents($source);
+        // Comments removed first, or this check reports the paragraph in the layout explaining that
+        // the package never builds one of these -- which is what it did when it was first written
+        $contents = sourceWithoutComments($source);
 
         foreach ($selfEscaping as $construct) {
             if (str_contains($contents, $construct)) {

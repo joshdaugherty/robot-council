@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
 use Laravel\Mcp\Facades\Mcp;
 use Laravel\Mcp\Server\Middleware\ReorderJsonAccept;
+use Livewire\Livewire;
 use RobotCouncil\Access\Allowlist;
 use RobotCouncil\Access\ApiGuards;
 use RobotCouncil\Access\Guard;
@@ -26,7 +27,10 @@ use RobotCouncil\Console\RevokeAbilityCommand;
 use RobotCouncil\Console\RevokeInstallationCommand;
 use RobotCouncil\Console\RevokeSessionCommand;
 use RobotCouncil\Console\SweepSessionsCommand;
+use RobotCouncil\Http\Controllers\DashboardStylesheetController;
+use RobotCouncil\Http\Middleware\DenyFraming;
 use RobotCouncil\Http\Middleware\EnsureAgentSession;
+use RobotCouncil\Http\Middleware\EnsureAllowlistedDeveloper;
 use RobotCouncil\Mcp\CouncilServer;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\Installation;
@@ -256,10 +260,34 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
         $apiPrefix = $this->routeString($config, 'api_prefix', 'robot-council/api');
         $apiMiddleware = $this->routeMiddleware($config, 'api_middleware', []);
 
+        // The stylesheet, deliberately outside the web group. It holds nothing a signed-in
+        // developer would not already see, and a page that needed authentication to load its own
+        // styling would render unstyled to exactly the people being told to sign in. Outside the
+        // group rather than merely public, because `StartSession` would otherwise run on every
+        // request for a static file -- writing a session record per anonymous hit, running the
+        // garbage-collection lottery, and attaching a `Set-Cookie` to a response this package tells
+        // shared caches they may store for a year.
+        Route::prefix($webPrefix)
+            ->name('robot-council.')
+            ->group(function (): void {
+                Route::get('dashboard.css', DashboardStylesheetController::class)
+                    ->name('dashboard.stylesheet');
+            });
+
         Route::middleware($webMiddleware)
             ->prefix($webPrefix)
             ->name('robot-council.')
             ->group(__DIR__.'/../routes/web.php');
+
+        // Livewire strips every middleware from its update endpoint that is not on its own fixed
+        // persistent list, so `EnsureAllowlistedDeveloper` does not run there and a developer
+        // removed from the access list keeps driving components from a page already open. Every
+        // dashboard slice mounts inside one, so this is registered with the routes rather than
+        // beside the component it happens to protect first.
+        Livewire::addPersistentMiddleware([
+            EnsureAllowlistedDeveloper::class,
+            DenyFraming::class,
+        ]);
 
         Route::middleware($apiMiddleware)
             ->prefix($apiPrefix)

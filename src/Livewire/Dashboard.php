@@ -63,6 +63,12 @@ final class Dashboard extends Component
      */
     public function render(): View
     {
-        return view('robot-council::livewire.dashboard');
+        // Pinned, because whether the analyzer can resolve a package view depends on whether it
+        // could boot the application, which differs between a developer's machine and CI. Written
+        // inline it passes locally and fails there with `expects view-string|null, string given`.
+        /** @var view-string $template */
+        $template = 'robot-council::livewire.dashboard';
+
+        return view($template);
     }
 }

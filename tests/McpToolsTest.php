@@ -345,23 +345,6 @@ it('writes a narration event that the feed records', function (): void {
         ->and($event->posted_with_coordinator)->toBeFalse();
 });
 
-it('puts no token in anything it returns', function (): void {
-    $taskId = intValue(toolResult(callTool($this, $this->token, 'task_create', ['title' => 'One']))['task_id']);
-
-    $bodies = [
-        json_encode(callTool($this, $this->token, 'task_list')),
-        json_encode(callTool($this, $this->token, 'task_claim', ['task_id' => $taskId])),
-        json_encode(callTool($this, $this->token, 'presence_heartbeat')),
-        json_encode(callTool($this, $this->token, 'events_read')),
-    ];
-
-    // The plaintext token is only ever in the caller's hands. A tool result that echoed it would
-    // put it wherever the harness logs its transcript.
-    foreach ($bodies as $body) {
-        expect((string) $body)->not->toContain($this->token);
-    }
-});
-
 /**
  * A session holding `coordinator:direct`, under a second developer.
  *

@@ -1,0 +1,163 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * The fleet's change feed, as a developer sees it.
+ *
+ * @command  vendor/bin/pest --compact tests/ChangeFeedTest.php
+ */
+
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
+use Livewire\Livewire;
+use RobotCouncil\Access\Ability;
+use RobotCouncil\Livewire\ChangeFeed;
+use RobotCouncil\Models\AgentSession;
+use RobotCouncil\Models\FleetEventType;
+use RobotCouncil\Support\FleetEvents;
+use RobotCouncil\Support\FleetFeed;
+use RobotCouncil\Tests\TestCase;
+
+beforeEach(function (): void {
+    $this->migrateUsersTableWithPackageColumns();
+
+    $this->setAccessLists(developers: [4242, 77]);
+
+    $this->developer = $this->enrollDeveloper(4242);
+
+    $this->installation = $this->approveInstallation($this->developer, [Ability::EventsPost->value]);
+
+    [$this->session, $this->token] = $this->startAgentSession($this->installation);
+
+    $this->actingAs($this->developer, 'web');
+});
+
+/**
+ * A session under a second developer, whose narration is nobody else's to read under #29.
+ *
+ * @param  TestCase  $case  The test case.
+ * @param  list<string>  $abilities  What the installation is granted.
+ * @return array{AgentSession, string} The session and its token.
+ */
+function otherSession(TestCase $case, array $abilities = [Ability::EventsPost->value]): array
+{
+    $other = $case->enrollDeveloper(77, login: 'somebody-else');
+
+    $installation = $case->approveInstallation($other, $abilities, machineLabel: 'their-box');
+
+    return $case->startAgentSession($installation);
+}
+
+it('shows an event with its type, body, actor and age', function (): void {
+    app(FleetEvents::class)->record(
+        FleetEventType::Narration,
+        $this->session,
+        'Rebuilding the index now.',
+    );
+
+    Livewire::test(ChangeFeed::class)
+        ->assertSee('Rebuilding the index now.')
+        ->assertSee('octodev')
+        ->assertSeeHtml('<span class="badge badge-sm">'.FleetEventType::Narration->value.'</span>')
+        ->assertSee('ago');
+});
+
+it("shows another developer's narration, which is what #73 decided", function (): void {
+    // #29 shows narration only to its own developer's sessions and to coordinators. A signed-in
+    // developer is neither, so the agent-facing read hides this and the dashboard does not.
+    [$theirs] = otherSession($this);
+
+    app(FleetEvents::class)->record(FleetEventType::Narration, $theirs, 'Only they would normally see this.');
+
+    // The control: read as this developer's own agent, that narration is absent while the state
+    // changes #29 sends to everyone are present -- so the read worked and the filter is what hid it
+    $asAgent = app(FleetFeed::class)->after($this->session, 0, 50);
+
+    $bodies = array_column($asAgent['events'], 'body');
+
+    expect($bodies)->not->toContain('Only they would normally see this.')
+        ->and($bodies)->not->toBeEmpty();
+
+    Livewire::test(ChangeFeed::class)
+        ->assertSee('Only they would normally see this.')
+        ->assertSee('somebody-else');
+});
+
+it('puts the newest event first', function (): void {
+    $events = app(FleetEvents::class);
+
+    $events->record(FleetEventType::Narration, $this->session, 'The older one.');
+    $events->record(FleetEventType::Narration, $this->session, 'The newer one.');
+
+    Livewire::test(ChangeFeed::class)->assertSeeInOrder(['The newer one.', 'The older one.']);
+});
+
+it('keeps the coordinator flag as it was when the event was written', function (): void {
+    [$coordinator] = otherSession($this, [Ability::CoordinatorDirect->value, Ability::EventsPost->value]);
+
+    app(FleetEvents::class)->record(
+        FleetEventType::Directive,
+        $coordinator,
+        'Everyone pause.',
+        withCoordinator: true,
+    );
+
+    Livewire::test(ChangeFeed::class)->assertSee('coordinator');
+
+    // Revoking the ability afterwards does not rewrite history: #23 records what was true at write
+    // time precisely so that a later revocation is not retroactive
+    $coordinator->installation->forceFill(['granted_abilities' => [Ability::EventsPost->value]])->save();
+
+    Livewire::test(ChangeFeed::class)
+        ->assertSee('Everyone pause.')
+        ->assertSee('coordinator');
+});
+
+it('shows an event an agent commits without the page being reloaded', function (): void {
+    $feed = Livewire::test(ChangeFeed::class)->assertDontSee('Posted while the page was open.');
+
+    app(FleetEvents::class)->record(FleetEventType::Narration, $this->session, 'Posted while the page was open.');
+
+    $feed->call('$refresh')->assertSee('Posted while the page was open.');
+});
+
+it('renders a hostile body as text', function (): void {
+    // A body is prose and has no charset limit, which is exactly what #67 exists for
+    app(FleetEvents::class)->record(FleetEventType::Narration, $this->session, '<script>alert(1)</script>');
+
+    $html = Livewire::test(ChangeFeed::class)->html();
+
+    expect($html)->toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+        ->not->toContain('<script>alert(1)</script>');
+});
+
+it('says the server acted when an event has no session', function (): void {
+    // The sweep writes events with no session at all, and a feed that said "an unknown account"
+    // for those would suggest a missing record rather than a server-side action
+    app(FleetEvents::class)->record(FleetEventType::SessionGone, null, 'A session ended.');
+
+    Livewire::test(ChangeFeed::class)->assertSee('the server')->assertDontSee('an unknown account');
+});
+
+it('polls on the interval the dashboard resolved', function (): void {
+    Livewire::test(ChangeFeed::class)->assertSeeHtml('wire:poll.5s');
+
+    Livewire::test(ChangeFeed::class, ['pollSeconds' => 30])->assertSeeHtml('wire:poll.30s');
+});
+
+it('will not let a client change the polling interval', function (): void {
+    Livewire::test(ChangeFeed::class)->set('pollSeconds', 0);
+})->throws(CannotUpdateLockedPropertyException::class);
+
+it('shows the feed through the gate, and refuses a stranger', function (): void {
+    app(FleetEvents::class)->record(FleetEventType::Narration, $this->session, 'Visible to a developer.');
+
+    $this->get(route('robot-council.dashboard'))->assertOk()->assertSee('Visible to a developer.');
+
+    $stranger = $this->enrollDeveloper(9999, login: 'stranger');
+
+    $this->actingAs($stranger, 'web')
+        ->get(route('robot-council.dashboard'))
+        ->assertForbidden()
+        ->assertDontSee('Visible to a developer.');
+});

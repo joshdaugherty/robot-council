@@ -91,6 +91,41 @@ final class FleetFeed
     }
 
     /**
+     * The most recent events, newest first, with nothing filtered out.
+     *
+     * **Named rather than flagged, and taking no session, deliberately.** #29's filter shows
+     * narration only to its own developer's sessions and to sessions that held `coordinator:direct`
+     * when they posted; the decision on robot-council/core#73 waives that for a signed-in developer,
+     * who is GitHub-authenticated and on the access list and is reading a dashboard rather than
+     * taking instructions from it. That decision records this as a privacy call rather than a
+     * security one, and as the first thing to revisit if the fleet ever spans parties who should not
+     * read each other's narration.
+     *
+     * A `bool $unfiltered` on `after()` would be the shape later passed `true` from an agent path by
+     * mistake. This cannot be reached by an agent-facing call at all.
+     *
+     * The order is the opposite of `after()`'s, and that is the point rather than an oversight: an
+     * agent reads forward from where it left off, and a person reads the top of the page.
+     *
+     * The caller is responsible for having established that the reader is an allowlisted developer.
+     * Nothing here checks it, because nothing here can.
+     *
+     * @param  int  $limit  How many to return, clamped to `MAX_PAGE`.
+     * @return list<array<string, mixed>> The events, newest first.
+     */
+    public function latest(int $limit): array
+    {
+        $events = FleetEvent::query()
+            ->orderByDesc('id')
+            ->limit(max(1, min($limit, self::MAX_PAGE)))
+            ->get();
+
+        $logins = $this->logins->forSessions($events->pluck('agent_session_id')->all());
+
+        return array_values($events->map(fn (FleetEvent $event): array => $this->describe($event, $logins))->all());
+    }
+
+    /**
      * One event as a reader sees it, with the provenance the fleet decides trust on.
      *
      * @param  FleetEvent  $event  The event.

@@ -91,6 +91,49 @@ final class FleetFeed
     }
 
     /**
+     * The most recent events, newest first, with nothing filtered out.
+     *
+     * **Named rather than flagged, and taking no session, deliberately.** #29's filter shows
+     * narration only to its own developer's sessions and to sessions that held `coordinator:direct`
+     * when they posted; the decision on robot-council/core#73 waives that for a signed-in developer,
+     * who is GitHub-authenticated and on the access list and is reading a dashboard rather than
+     * taking instructions from it. That decision records this as a privacy call rather than a
+     * security one, and as the first thing to revisit if the fleet ever spans parties who should not
+     * read each other's narration.
+     *
+     * A `bool $unfiltered` on `after()` would be the shape later passed `true` from an agent path by
+     * mistake. This cannot be reached by an agent-facing call at all.
+     *
+     * The order is the opposite of `after()`'s, and that is the point rather than an oversight: an
+     * agent reads forward from where it left off, and a person reads the top of the page.
+     *
+     * The caller is responsible for having established that the reader is an allowlisted developer.
+     * Nothing here checks it, because nothing here can.
+     *
+     * `$before` walks backwards into older events, which is the direction a person reads a stream.
+     * Without it the panel would show a fixed window of the head and everything older would be
+     * unreachable -- and a feed is not a list: what falls out of the window is gone rather than
+     * merely unsorted. One presence sweep over a hundred lapsed sessions writes a hundred events in
+     * a burst, so the window turns over quickly enough for that to matter.
+     *
+     * @param  int  $limit  How many to return, clamped to `MAX_PAGE`.
+     * @param  int|null  $before  The oldest event already seen, or null for the head.
+     * @return list<array<string, mixed>> The events, newest first.
+     */
+    public function latest(int $limit, ?int $before = null): array
+    {
+        $events = FleetEvent::query()
+            ->when($before !== null, fn (Builder $query) => $query->where('id', '<', $before))
+            ->orderByDesc('id')
+            ->limit(max(1, min($limit, self::MAX_PAGE)))
+            ->get();
+
+        $logins = $this->logins->forSessions($events->pluck('agent_session_id')->all());
+
+        return array_values($events->map(fn (FleetEvent $event): array => $this->describe($event, $logins))->all());
+    }
+
+    /**
      * One event as a reader sees it, with the provenance the fleet decides trust on.
      *
      * @param  FleetEvent  $event  The event.

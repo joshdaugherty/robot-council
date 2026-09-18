@@ -7,4 +7,6 @@
     <livewire:robot-council-fleet-presence :poll-seconds="$pollSeconds" />
 
     <livewire:robot-council-task-board :poll-seconds="$pollSeconds" />
+
+    <livewire:robot-council-change-feed :poll-seconds="$pollSeconds" />
 </div>

@@ -75,6 +75,84 @@ function phpSourcesIn(string $directory): array
 }
 
 /**
+ * Every interpolation in a URL-bearing attribute that is not a server-derived URL.
+ *
+ * Escaping is no defense here, which is what makes this its own check. `htmlspecialchars` alters
+ * nothing in `javascript:alert(1)` -- there is no character in it to escape -- so
+ * `<a href="{{ $task->link }}">` passes every escaping guard the package has and still executes on
+ * click. The same holds for `src`, `action`, `formaction`, `poster` and `xlink:href`.
+ *
+ * The defense is that no value a requester or an agent supplied ever reaches one of these, so the
+ * check allows only URLs the server built: `route()`, `url()`, `asset()`, `secure_url()` and
+ * `action()`. Anything else in one of these attributes is reported, including a bare variable that
+ * happens to hold a safe URL today -- the point is that the attribute is not a place to decide it.
+ *
+ * Comments and `@verbatim` blocks are stripped first, for the reason `rawOutputIn()` records.
+ *
+ * @param  string  $template  The template's contents.
+ * @return list<string> One description per offending attribute.
+ */
+function urlAttributeInterpolations(string $template): array
+{
+    $withoutBlocks = preg_replace('/(?<!@)@verbatim(.*?)@endverbatim/s', '', $template) ?? $template;
+    $withoutComments = preg_replace('/\{\{--.*?--\}\}/s', '', $withoutBlocks) ?? $withoutBlocks;
+
+    $attributes = 'href|src|srcset|srcdoc|action|formaction|poster|cite|background|manifest|ping|longdesc|data|xlink:href|data-url';
+
+    // Quoted and unquoted forms both, because an unquoted value breaks out on a space rather than
+    // on a quote and is the easier of the two to get wrong
+    // An interpolation is matched as a unit in every branch. In a quoted value that is because a
+    // `"` inside the expression -- `href="{{ $task->urlFor("view") }}"` is ordinary Blade -- would
+    // otherwise end the capture early, leave no complete interpolation in it, and consume past the
+    // real closing quote so nothing was rescanned. In an unquoted value it is because `src={{ $x }}`
+    // holds spaces and a bare `[^\s>]+` stops at the first one. `s` so a expression may span lines.
+    $span = '\{\{.*?\}\}|\{!!.*?!!\}';
+
+    $pattern = '/(?<![\w:-])(?<attribute>'.$attributes.')\s*=\s*(?:'
+        .'"(?<double>(?:'.$span.'|[^"])*)"'
+        ."|'(?<single>(?:".$span."|[^'])*)'"
+        .'|(?<bare>(?:'.$span.'|[^\s>])+)'
+        .')/is';
+
+    preg_match_all($pattern, $withoutComments, $matches, PREG_SET_ORDER);
+
+    // A literal first argument, not merely the helper's name. `url($x)` and `asset($x)` return
+    // their argument **verbatim** whenever `UrlGenerator::isValidUrl()` accepts it -- measured,
+    // `url('//evil.example/steal')` and `url('https://evil.example/x')` come back unchanged -- so
+    // an allowlist keyed on the name alone admits an off-site link or a remote script load.
+    // `route()` and `action()` are safe with any argument, because route parameters are
+    // `rawurlencode`d and the scheme is the application's, but requiring the literal costs nothing.
+    $serverBuilt = '/^\s*(?:route|url|asset|secure_url|action)\s*\(\s*[\'"]/';
+
+    $offenders = [];
+
+    foreach ($matches as $match) {
+        $value = ($match['double'] ?? '') !== '' ? $match['double']
+            : ((($match['single'] ?? '') !== '') ? $match['single'] : ($match['bare'] ?? ''));
+
+        if (preg_match_all('/\{\{(.+?)\}\}|\{!!(.+?)!!\}/s', $value, $found, PREG_SET_ORDER) === 0) {
+            continue;
+        }
+
+        foreach ($found as $interpolation) {
+            $expression = trim($interpolation[2] ?? '') !== ''
+                ? trim($interpolation[2])
+                : trim($interpolation[1] ?? '');
+
+            if (preg_match($serverBuilt, $expression) === 1) {
+                continue;
+            }
+
+            // Whitespace collapsed, as `rawOutputIn()` does, so an expression spanning lines reads
+            // as one line in the failure message rather than breaking it across several
+            $offenders[] = $match['attribute'].'="'.trim((string) preg_replace('/\s+/', ' ', $expression)).'"';
+        }
+    }
+
+    return $offenders;
+}
+
+/**
  * Every construct in one Blade template that can put bytes into the document unescaped.
  *
  * Not only `{!! !!}`. Blade compiles three shapes that skip `e()`, and a guard that knew about one
@@ -112,7 +190,7 @@ function rawOutputIn(string $template): array
     // Taken out first, exactly as Blade takes them out first. Their contents are reported rather
     // than discarded, because a `@php` block is one of the shapes being looked for.
     $withoutBlocks = preg_replace_callback(
-        '/@verbatim(?<verbatim>.*?)@endverbatim|@php(?<php>.*?)@endphp/s',
+        '/(?<!@)@verbatim(?<verbatim>.*?)@endverbatim|(?<!@)@php(?<php>.*?)@endphp/s',
         static function (array $match) use (&$findings): string {
             if (($match['php'] ?? '') !== '') {
                 $findings[] = '@php block: '.trim((string) preg_replace('/\s+/', ' ', $match['php']));

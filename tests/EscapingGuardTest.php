@@ -25,6 +25,7 @@ declare(strict_types=1);
  * @command  vendor/bin/pest --compact tests/EscapingGuardTest.php
  */
 
+use RobotCouncil\Support\Locks;
 use RobotCouncil\Tests\Fixtures\HostileContent;
 
 beforeEach(function (): void {
@@ -180,3 +181,151 @@ it('renders a hostile value inert whatever sink it was aimed at', function (stri
         expect($html)->not->toContain($live);
     }
 })->with(HostileContent::dataset());
+
+it('reports an interpolation in a URL attribute, and leaves a server-built URL alone', function (): void {
+    // The detector's own control. A `javascript:` URL survives `htmlspecialchars` untouched, so a
+    // guard that reported nothing here would look identical to one with nothing to report.
+    expect(urlAttributeInterpolations('<a href="{{ $task->link }}">go</a>'))
+        ->toBe(['href="$task->link"']);
+
+    // Unquoted, which breaks out on a space rather than a quote
+    expect(urlAttributeInterpolations('<img src={{ $avatar }}>'))->toBe(['src="$avatar"']);
+
+    // Every URL the server built is fine, and the package's own pages are made of these
+    expect(urlAttributeInterpolations('<form action="{{ route(\'robot-council.enroll.deny\') }}">'))->toBeEmpty();
+    expect(urlAttributeInterpolations('<img src="{{ asset(\'x.png\') }}">'))->toBeEmpty();
+
+    // Not a URL attribute, so not this check's business -- `rawOutputIn()` covers the escaping
+    expect(urlAttributeInterpolations('<p title="{{ $task->title }}">x</p>'))->toBeEmpty();
+});
+
+it('puts no requester-supplied or agent-supplied value in a URL attribute', function (): void {
+    $views = bladeTemplatesIn(__DIR__.'/../resources/views');
+
+    expect($views)->not->toBeEmpty();
+
+    $offenders = [];
+
+    foreach ($views as $view) {
+        foreach (urlAttributeInterpolations((string) file_get_contents($view)) as $finding) {
+            $offenders[] = basename($view).' -- '.$finding;
+        }
+    }
+
+    // Escaping cannot help here, so the rule is that such a value never reaches a URL at all. A
+    // page that genuinely needs one has to allowlist the scheme at the point of use and record why.
+    expect($offenders)->toBeEmpty(
+        'Interpolations in URL attributes that the server did not build:'.PHP_EOL.implode(PHP_EOL, $offenders)
+    );
+});
+
+it('shows the javascript payload is detectable, against a sink no package view has', function (): void {
+    // The corpus row aimed at a URL cannot fail against the package's own pages, because none of
+    // them puts a value in a URL attribute -- which is the guarantee the test above enforces. Left
+    // there, the row would be a tripwire nobody can trip, indistinguishable from a passing one.
+    // So it is exercised here against a deliberately unguarded sink.
+    $payload = 'javascript:alert(1)';
+
+    $unguarded = '<a href="'.e($payload).'">go</a>';
+
+    $forbidden = arrayValue(HostileContent::payloads()['a javascript URL'])['forbidden'];
+
+    $survived = array_values(array_filter(
+        arrayValue($forbidden),
+        static fn (mixed $live): bool => \is_string($live) && str_contains($unguarded, $live)
+    ));
+
+    // Escaping the payload changes nothing about it, which is the whole point of the row -- and it
+    // is the one assertion here that is not circular, since the sink string is built by this test.
+    expect(e($payload))->toBe($payload);
+
+    // A property rather than the exact array. Pinning the contents would fail this test when a
+    // genuinely stronger entry is added to the corpus, which punishes the improvement.
+    expect($survived)->not->toBeEmpty();
+});
+
+it('admits no executable payload in any charset-limited field, though it does admit an off-site URL', function (string $label, string $pattern): void {
+    // An earlier version of this test claimed these allowlists "admit no colon, so none can carry
+    // `javascript:`". That is false, and it passed only because its single probe was
+    // `javascript:alert(1)`, whose parentheses are out of charset. A lock name's class is
+    // `[A-Za-z0-9._:\/-]` and the colon is in it deliberately, so `branch:feature/foo` works.
+    //
+    // What is true, and is what these fields actually buy, is narrower: none of the four admits a
+    // parenthesis, an equals sign, a percent or whitespace, so none can express a call or an
+    // assignment and none can carry executable JavaScript.
+    foreach (['(', ')', '=', '%', ' ', '"', "'"] as $needed) {
+        expect(preg_match($pattern, 'a'.$needed.'b'))->toBe(0);
+    }
+
+    // The control: the pattern accepts something ordinary, so one that refused everything could not
+    // pass as a guarantee
+    expect('harmless-value')->toMatch($pattern);
+})->with([
+    'harness' => ['harness', '/^[a-z0-9-]{1,32}$/D'],
+    'machine_label' => ['machine_label', '/^[A-Za-z0-9._-]{1,64}$/D'],
+    'project_id' => ['project_id', '/^[A-Za-z0-9._\/-]{1,128}$/D'],
+
+    // Read from the source of truth rather than retyped. The other three have one call site each
+    // and no constant yet; this one has three and does.
+    'a lock name' => ['a lock name', Locks::NAME],
+]);
+
+it('is why the structural rule exists: an off-site URL IS expressible in two of those fields', function (): void {
+    // The charset limits stop executable JavaScript and nothing else. `//evil.example/steal` is a
+    // protocol-relative URL -- an off-site link in an `href`, a remote script or image load in a
+    // `src` -- and it needs none of the characters the fields exclude.
+    expect('//evil.example/steal')->toMatch('/^[A-Za-z0-9._\/-]{1,128}$/D')
+        ->and('//evil.example/steal')->toMatch(Locks::NAME)
+        ->and('javascript:')->toMatch(Locks::NAME);
+
+    // Which is the point: the guarantee is that no such value reaches a URL attribute at all, not
+    // that the value could not be a URL. The charset limits are a second line, not the first.
+    expect(urlAttributeInterpolations('<a href="{{ $task->project_id }}">go</a>'))
+        ->toBe(['href="$task->project_id"']);
+});
+
+it('is not blinded by an escaped verbatim marker', function (): void {
+    // `@@verbatim` is the escape sequence telling Blade NOT to open a block, so Blade renders the
+    // marker literally and compiles what follows. A stripper without Blade's own `(?<!@)` lookbehind
+    // opens a block anyway and deletes to the next `@endverbatim`, taking a live sink with it.
+    $template = "@@verbatim\n<a href=\"{{ \$agentValue }}\">go</a>\n@endverbatim";
+
+    expect(urlAttributeInterpolations($template))->toBe(['href="$agentValue"'])
+        ->and(rawOutputIn("@@verbatim\n<p>{!! \$evil !!}</p>\n@endverbatim"))
+        ->toBe(['unescaped echo: {!! $evil !!}']);
+
+    // And the unescaped form still suppresses, so the fix did not simply disable the stripper
+    expect(urlAttributeInterpolations("@verbatim\n<a href=\"{{ \$x }}\">go</a>\n@endverbatim"))->toBeEmpty();
+});
+
+it('allows only a URL the server built from a literal', function (): void {
+    // `url()` and `asset()` return their argument verbatim whenever `UrlGenerator::isValidUrl()`
+    // accepts it, so the helper's name alone is not a guarantee. Measured: `url('//evil.example')`
+    // and `url('https://evil.example/x')` come back unchanged.
+    expect(urlAttributeInterpolations('<a href="{{ url($agentValue) }}">go</a>'))
+        ->toBe(['href="url($agentValue)"'])
+        ->and(urlAttributeInterpolations('<img src="{{ asset($agentValue) }}">'))
+        ->toBe(['src="asset($agentValue)"']);
+
+    // A literal argument is the case the package actually uses
+    expect(urlAttributeInterpolations('<a href="{{ url(\'/docs\') }}">go</a>'))->toBeEmpty()
+        ->and(urlAttributeInterpolations('<form action="{{ route(\'robot-council.enroll.deny\') }}">'))->toBeEmpty();
+});
+
+it('sees an interpolation that contains a quote, or spans lines, or sits in a widened attribute', function (): void {
+    // A double quote inside the expression is ordinary Blade. Capturing the attribute value as
+    // `[^"]*` ended it at that quote, found no complete interpolation, and then consumed past the
+    // real closing quote so nothing was rescanned -- a silent false negative.
+    expect(urlAttributeInterpolations('<a href="{{ $task->urlFor("view") }}">go</a>'))
+        ->toBe(['href="$task->urlFor("view")"']);
+
+    expect(urlAttributeInterpolations("<img src={{ \$task\n->link }}>"))
+        ->toBe(['src="$task ->link"']);
+
+    // Attributes that carry a URL and were not in the first list
+    expect(urlAttributeInterpolations('<object data="{{ $x }}"></object>'))->toBe(['data="$x"']);
+    expect(urlAttributeInterpolations('<img srcset="{{ $x }} 2x">'))->toBe(['srcset="$x"']);
+
+    // And a name that merely ends in one of them is not one of them
+    expect(urlAttributeInterpolations('<a data-href="{{ $x }}">go</a>'))->toBeEmpty();
+});

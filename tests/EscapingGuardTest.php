@@ -105,10 +105,13 @@ it('renders a hostile value inert whatever sink it was aimed at', function (stri
     // so the page is the only place the guarantee can live for them.
     $enrollment = requestDeviceCode($this);
 
-    $enrollment['record']->forceFill([
-        'machine_label' => $payload,
-        'harness' => $payload,
-    ])->save();
+    // `machine_label` alone, because `harness` is `varchar(32)` and the script-breakout payload is
+    // 34 characters. Postgres refuses an overlong value with `22001` where SQLite stores it, so
+    // writing both passed every local run and failed only in the `postgres` job. Asserted rather
+    // than left as a comment, so a payload added later that does not fit fails on every driver.
+    expect(mb_strlen($payload))->toBeLessThanOrEqual(64);
+
+    $enrollment['record']->forceFill(['machine_label' => $payload])->save();
 
     $response = $this->actingAs($this->developer, 'web')
         ->get(route('robot-council.enroll.show', ['user_code' => $enrollment['record']->user_code]));

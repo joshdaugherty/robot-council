@@ -58,6 +58,14 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
 
 - **Every API must exist in the lowest supported Laravel version.** `composer.json` admits Laravel `^13.23.0` (`illuminate/contracts`), but the development install resolves the newest. The floor is the lowest release CI can test: its `prefer-lowest` cells resolve `laravel/framework` v13.23.0, because `orchestra/testbench ^11.2.0` requires it. Move the constraint whenever that tested floor moves, for example after raising the Testbench constraint.
 - **Anything written into `vendor/orchestra/testbench-core/laravel/` changes what the tools see, and CI has none of it.** That skeleton is Testbench's throwaway application, and a `vendor/bin/testbench` run or a test that publishes into it leaves files behind that a fresh CI install does not have. Two costs found so far: a `.env` copied from `.env.example` supplied an `APP_KEY` the suite was relying on, and leftover `*_create_personal_access_tokens_table.php` files under its `database/migrations/` let Larastan infer `PersonalAccessToken`'s columns, so `composer analyse` passed locally and failed in CI on `Access to an undefined property`. To reproduce a CI-only analysis failure, empty that directory and delete `build/phpstan` before running. Do not write narrowing that only one side asks for: `Command::argument()` and package view strings are inferred differently depending on whether the analyzer could boot the application, so a check written for one side is reported as dead code by the other. Take `mixed` and narrow inside a helper, as `Access\Tokens` and `Console\Argument` do.
+- **SQLite does not enforce a `varchar` length and Postgres does**, so a fixture that writes an
+  overlong value passes every local run and fails only in the `postgres` job. `$table->string('x', 32)`
+  is a hard limit there: Postgres answers `SQLSTATE[22001] value too long for type character
+  varying(32)` where SQLite stores the value whole. Measured on a test that wrote a 34-character
+  payload into `robot_council_device_codes.harness`, which is `varchar(32)`. A test that writes past
+  validation on purpose -- which is how the escaping guards prove the page rather than the validator
+  -- has no rule to keep it inside the column, so it has to assert the bound itself.
+
 - **Restoring a Blade view does not undo it: the compiled view wins on mtime.** Blade recompiles only
   when the source is newer than its cache under
   `vendor/orchestra/testbench-core/laravel/storage/framework/views/`, and a `cp` restore writes an

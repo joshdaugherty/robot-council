@@ -10,6 +10,7 @@ use Illuminate\Validation\Rule;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Support\Credentials;
 use RobotCouncil\Support\DeviceCodes;
+use RobotCouncil\Support\MachineIdentity;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -40,8 +41,8 @@ final class DeviceCodeController
             // harness plus a newline is 33 bytes into a 32-byte column, which is a 500 from an
             // unauthenticated endpoint on Postgres and on MySQL in strict mode. The `max:` rules
             // bound it a second way, in bytes the column can hold.
-            'harness' => ['required', 'string', 'max:32', 'regex:/^[a-z0-9-]{1,32}$/D'],
-            'machine_label' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]{1,64}$/D'],
+            'harness' => ['required', 'string', 'max:'.MachineIdentity::MAX_HARNESS, 'regex:'.MachineIdentity::HARNESS],
+            'machine_label' => ['required', 'string', 'max:'.MachineIdentity::MAX_LABEL, 'regex:'.MachineIdentity::LABEL],
 
             // `*` and `coordinator:direct` are absent from this list, so neither can be asked for
             'requested_abilities' => ['required', 'array', 'min:1'],

@@ -6,6 +6,7 @@ namespace RobotCouncil\Support;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
+use InvalidArgumentException;
 use RobotCouncil\Models\DeviceCode;
 use RobotCouncil\Support\Contracts\DrawsUserCodes;
 use RuntimeException;
@@ -21,6 +22,13 @@ use RuntimeException;
  */
 final class DeviceCodes
 {
+    /**
+     * The longest requested IP the package stores.
+     *
+     * 45 characters, which is what an IPv6 address carrying an embedded IPv4 needs.
+     */
+    public const int MAX_REQUESTED_IP = 45;
+
     /**
      * How many times to redraw a user code that collides with a live one before giving up, so a
      * saturated alphabet fails loudly instead of looping.
@@ -71,6 +79,8 @@ final class DeviceCodes
      * @param  string|null  $requestedIp  The address the request arrived from.
      * @return IssuedDeviceCode The stored row and the plaintext device code.
      *
+     * @throws InvalidArgumentException When the harness, the machine label, or the requested IP is
+     *                                  outside what the package stores.
      * @throws RuntimeException When no free user code was found in the allowed attempts.
      */
     public function issue(
@@ -80,6 +90,23 @@ final class DeviceCodes
         string $codeChallenge,
         ?string $requestedIp
     ): IssuedDeviceCode {
+        // Bounded here as well as in `DeviceCodeController`, because this is a public method on an
+        // injectable service and both values reach other developers' agents: `AgentSessions::start()`
+        // writes them into the change feed, which every session reads. `CLAUDE.md` records the
+        // measurement that makes the length half real -- a 34-character write into this table's
+        // `varchar(32)` harness passed every local SQLite run and failed only CI's `postgres` job.
+        MachineIdentity::ensure($harness, $machineLabel);
+
+        // The column is `varchar(45)`, which is what an IPv6 address with an embedded IPv4 needs.
+        // The endpoint passes `$request->ip()` and a host may pass anything.
+        if ($requestedIp !== null && mb_strlen($requestedIp) > self::MAX_REQUESTED_IP) {
+            throw new InvalidArgumentException(sprintf(
+                'A requested IP is limited to %d characters, and this one is %d.',
+                self::MAX_REQUESTED_IP,
+                mb_strlen($requestedIp)
+            ));
+        }
+
         // 256 bits, well past the 128 the flow calls for, and stored only as its hash
         $deviceCode = bin2hex(random_bytes(32));
 

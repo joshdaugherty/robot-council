@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RobotCouncil\Http\Principal;
 use RobotCouncil\Http\Rules\BoundedMeta;
+use RobotCouncil\Models\FleetEvent;
 use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Support\FleetEvents;
 use Symfony\Component\HttpFoundation\Response;
@@ -22,11 +23,6 @@ use Symfony\Component\HttpFoundation\Response;
 final class PostDirectiveController
 {
     /**
-     * The longest directive body the feed accepts.
-     */
-    private const int MAX_BODY = 4000;
-
-    /**
      * Record one directive.
      *
      * @param  Request  $request  The incoming request.
@@ -36,7 +32,7 @@ final class PostDirectiveController
     public function __invoke(Request $request, FleetEvents $events): JsonResponse
     {
         $request->validate([
-            'body' => ['required', 'string', 'max:'.self::MAX_BODY],
+            'body' => ['required', 'string', 'max:'.FleetEvent::MAX_BODY],
             'meta' => ['sometimes', 'array', new BoundedMeta],
         ]);
 

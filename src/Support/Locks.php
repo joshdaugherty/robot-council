@@ -75,7 +75,7 @@ final class Locks
         // injectable service and the drivers disagree about what an over-long name does: MySQL's
         // `insert ignore` silently truncates it -- so every later lookup by the full name misses,
         // leaving a junk row and a permanent conflict -- while Postgres raises and SQLite stores it.
-        if ($name === '' || \strlen($name) > Lock::MAX_NAME || preg_match(self::NAME, $name) !== 1) {
+        if ($name === '' || mb_strlen($name) > Lock::MAX_NAME || preg_match(self::NAME, $name) !== 1) {
             throw new InvalidArgumentException('A lock name must be 1 to 191 characters of [A-Za-z0-9._:/-].');
         }
 

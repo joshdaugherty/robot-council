@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RobotCouncil\Support;
 
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\FleetEvent;
 use RobotCouncil\Models\FleetEventType;
@@ -54,6 +55,8 @@ final class FleetEvents
      * @param  array<string, mixed>  $meta  Structured detail.
      * @param  bool  $withCoordinator  Whether the session held `coordinator:direct` as it posted.
      * @return FleetEvent The recorded event.
+     *
+     * @throws InvalidArgumentException When the body is longer than `FleetEvent::MAX_BODY`.
      */
     public function record(
         FleetEventType $type,
@@ -62,6 +65,20 @@ final class FleetEvents
         array $meta = [],
         bool $withCoordinator = false
     ): FleetEvent {
+        // Bounded here as well as at the four call sites that validate it. `record()` is a public
+        // method a host may call directly, and `body` is a `text` column -- 65,535 bytes on MySQL
+        // and unbounded on Postgres and SQLite, so an over-long body is an error on one engine and
+        // a silently enormous row on the other two. Every in-package caller is bounded by
+        // construction (task ids, lock names at 191, a harness and label at 96 together), so this
+        // is exactly the direct-call path the bound exists for.
+        if ($body !== null && mb_strlen($body) > FleetEvent::MAX_BODY) {
+            throw new InvalidArgumentException(sprintf(
+                'An event body is limited to %d characters, and this one is %d.',
+                FleetEvent::MAX_BODY,
+                mb_strlen($body)
+            ));
+        }
+
         // A savepoint when a caller already has a transaction open, which is the ordinary case:
         // the event and the state change it records commit or roll back together. The advisory
         // lock below is scoped to the outermost transaction either way.

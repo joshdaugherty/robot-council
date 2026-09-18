@@ -43,6 +43,14 @@ use Illuminate\Support\Carbon;
 final class FleetEvent extends Model
 {
     /**
+     * The longest body an event may carry.
+     *
+     * Policy rather than capacity: the column is `text`, which holds far more. A body reaches every
+     * agent the visibility rule admits, and an agent's context window is the real budget.
+     */
+    public const int MAX_BODY = 4000;
+
+    /**
      * Nothing updates an event, so there is no column to touch.
      */
     public const ?string UPDATED_AT = null;

@@ -137,12 +137,23 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
   agree rather than inventing a behavior. A test for either writes through the store, never through
   the endpoint, or it tests the validator instead of the guarantee, and it asserts on the ROW rather
   than on the instance the store returned, which reports whatever PHP handed in.
-  **The pattern is applied to `Locks`, `Tasks` and `AgentSessions`; the other five stores are #91.**
+  **Every store now holds its own bounds**, through one narrow helper per value rather than a check
+  per call site: `Support\HostKey` (64, the width of the six columns holding a host user key),
+  `Support\ProjectId` (128 and a charset), and `Support\MachineIdentity` (`harness` 32,
+  `machine_label` 64, each with a charset). `Models\FleetEvent::MAX_BODY` replaced four private
+  copies of `4000`. **The unit is characters, everywhere**, because that is what Laravel's `max:`
+  rule measures -- `ValidatesAttributes::getSize()` ends `return mb_strlen($value ?? '')` -- and what
+  Postgres and MySQL count a `varchar` in. `Locks::acquire()` measured bytes and was aligned, which
+  changed **no** input's fate: its charset regex is ASCII-only, so any string where the two functions
+  disagree is refused by the regex either way. It is an equivalent mutant, and no test can tell the
+  two versions apart -- worth knowing before someone "proves" the fix with a passing suite.
+  **`HostKey` refuses rather than truncates**, because two developers whose keys share a 64-character
+  prefix would collapse into one, which is an access-control failure rather than a storage one.
   Two related traps: a `string()` with no length takes `Schema::$defaultStringLength`, a public
-  static the HOST may lower, so every column here declares its own; and `Support\ProjectId` holds
-  one bound for the two tables that store a project id, because it is the field that leaves
-  `TaskList`'s visibility rule -- `Tasks::create()` puts it in the feed's `meta`, which every session
-  reads.
+  static the HOST may lower, so every column declares its own; and the values that leave a
+  visibility rule -- `project_id`, `harness`, `machine_label` -- are charset-limited as well as
+  length-limited, because `Tasks::create()` and `AgentSessions::start()` write them into the change
+  feed, which every session in the fleet reads.
 - **SQLite does not enforce a `varchar` length and Postgres does**, so a fixture that writes an
   overlong value passes every local run and fails only in the `postgres` job. `$table->string('x', 32)`
   is a hard limit there: Postgres answers `SQLSTATE[22001] value too long for type character

@@ -14,6 +14,7 @@ use RobotCouncil\Access\Ability;
 use RobotCouncil\Http\Rules\BoundedMeta;
 use RobotCouncil\Mcp\ActsAsAgent;
 use RobotCouncil\Mcp\Arguments;
+use RobotCouncil\Models\FleetEvent;
 use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Support\FleetEvents;
 
@@ -23,11 +24,6 @@ use RobotCouncil\Support\FleetEvents;
 final class PostDirectiveTool extends Tool
 {
     use ActsAsAgent;
-
-    /**
-     * The longest directive the feed accepts.
-     */
-    private const int MAX_BODY = 4000;
 
     /**
      * The tool's name.
@@ -60,7 +56,7 @@ final class PostDirectiveTool extends Tool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'body' => $schema->string()->max(self::MAX_BODY)->description('The instruction.')->required(),
+            'body' => $schema->string()->max(FleetEvent::MAX_BODY)->description('The instruction.')->required(),
             'meta' => $schema->object()->description('Structured detail. Bounded in size.'),
         ];
     }
@@ -80,7 +76,7 @@ final class PostDirectiveTool extends Tool
         }
 
         $request->validate([
-            'body' => ['required', 'string', 'max:'.self::MAX_BODY],
+            'body' => ['required', 'string', 'max:'.FleetEvent::MAX_BODY],
             'meta' => ['sometimes', 'array', new BoundedMeta],
         ]);
 

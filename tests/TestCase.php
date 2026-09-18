@@ -9,6 +9,7 @@ use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use Laravel\Mcp\Server\McpServiceProvider;
 use Laravel\Sanctum\Sanctum;
 use Laravel\Sanctum\SanctumServiceProvider;
 use Laravel\Socialite\SocialiteServiceProvider;
@@ -100,7 +101,11 @@ class TestCase extends Orchestra
     protected function getPackageProviders($app)
     {
         return [
-            // A host application discovers these through Composer; Testbench does not
+            // A host application discovers these through Composer; Testbench does not. The MCP
+            // provider is not optional decoration: it registers the callback that copies a tool
+            // call's arguments onto the `Request` a tool type-hints, so without it every tool runs
+            // with no arguments and answers a validation error.
+            McpServiceProvider::class,
             SocialiteServiceProvider::class,
             SanctumServiceProvider::class,
             RobotCouncilServiceProvider::class,

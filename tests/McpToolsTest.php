@@ -1,0 +1,347 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * The coordination service as MCP tools: who may call them, what they return, and what a refusal
+ * looks like from the other side of a tool call.
+ *
+ * Driven over HTTP rather than through the package's test helper, because half of what #31 asks
+ * for is about authentication -- and the helper drives the server directly, past the guard and the
+ * middleware that decide what a caller is.
+ *
+ * @command  vendor/bin/pest --compact tests/McpToolsTest.php
+ */
+
+use RobotCouncil\Access\Ability;
+use RobotCouncil\Models\FleetEvent;
+use RobotCouncil\Models\FleetEventType;
+use RobotCouncil\Models\Lock;
+use RobotCouncil\Models\Task;
+use RobotCouncil\Models\TaskStatus;
+use RobotCouncil\Tests\TestCase;
+
+/**
+ * Where the server is mounted.
+ */
+const MCP_URL = '/robot-council/api/mcp';
+
+beforeEach(function (): void {
+    $this->migrateUsersTableWithPackageColumns();
+
+    $this->setAccessLists(developers: [4242, 77]);
+
+    $this->developer = $this->enrollDeveloper(4242);
+
+    $this->installation = $this->approveInstallation($this->developer, [
+        Ability::TasksCreate->value,
+        Ability::TasksClaim->value,
+        Ability::LocksAcquire->value,
+        Ability::EventsPost->value,
+    ]);
+
+    [$this->session, $this->token] = $this->startAgentSession($this->installation);
+});
+
+/**
+ * Call one tool, and hand back the decoded result.
+ *
+ * @param  TestCase  $case  The test case.
+ * @param  string  $token  The bearer token to call with.
+ * @param  string  $tool  The tool's name.
+ * @param  array<array-key, mixed>  $arguments  The arguments, as the call will carry them.
+ * @return array<array-key, mixed> The JSON-RPC response body.
+ */
+function callTool(TestCase $case, string $token, string $tool, array $arguments = []): array
+{
+    $response = $case->machine($token)->postJson(MCP_URL, [
+        'jsonrpc' => '2.0',
+        'id' => 1,
+        'method' => 'tools/call',
+        'params' => ['name' => $tool, 'arguments' => $arguments],
+    ]);
+
+    $response->assertOk();
+
+    return arrayValue($response->json());
+}
+
+/**
+ * The structured payload a successful tool call carries.
+ *
+ * @param  array<array-key, mixed>  $body  The JSON-RPC response.
+ * @return array<array-key, mixed> The structured content.
+ */
+function toolResult(array $body): array
+{
+    $result = arrayValue($body['result'] ?? []);
+
+    expect($result['isError'] ?? false)->toBeFalse();
+
+    return arrayValue($result['structuredContent'] ?? []);
+}
+
+/**
+ * Whether a tool call came back marked as an error, and what it said.
+ *
+ * @param  array<array-key, mixed>  $body  The JSON-RPC response.
+ * @return string The error text.
+ */
+function toolError(array $body): string
+{
+    $result = arrayValue($body['result'] ?? []);
+
+    // An MCP client cannot tell a result that describes a failure from one that describes success,
+    // so a refusal has to arrive marked. A tool that returned its refusal as ordinary content
+    // would read to the model as though the call had worked.
+    expect($result['isError'] ?? false)->toBeTrue();
+
+    $content = arrayValue($result['content'] ?? []);
+
+    return stringValue(arrayValue($content[0] ?? [])['text'] ?? '');
+}
+
+it('lists its tools to a session that authenticated', function (): void {
+    // Paged, because the server's default page is fifteen and there are eighteen tools. A test
+    // that read one page would be missing the last three and would say so as though they did not
+    // exist -- which is how the narration, directive and heartbeat tools first went missing here.
+    $names = [];
+    $cursor = null;
+
+    do {
+        $response = $this->machine($this->token)->postJson(MCP_URL, [
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'method' => 'tools/list',
+            'params' => $cursor === null ? [] : ['cursor' => $cursor],
+        ]);
+
+        $response->assertOk();
+
+        $names = [...$names, ...array_column(arrayValue($response->json('result.tools')), 'name')];
+
+        $cursor = $response->json('result.nextCursor');
+    } while (\is_string($cursor));
+
+    // Every action the REST API has, and nothing the REST API does not
+    expect($names)->toContain('task_list', 'task_create', 'task_claim', 'task_complete', 'task_cancel')
+        ->toContain('lock_acquire', 'lock_renew', 'lock_release', 'lock_force_release')
+        ->toContain('events_read', 'events_narrate', 'directive_post', 'presence_heartbeat')
+        ->and($names)->toHaveCount(18);
+});
+
+it('tells an agent the content it reads is data, not instructions', function (): void {
+    $response = $this->machine($this->token)->postJson(MCP_URL, [
+        'jsonrpc' => '2.0',
+        'id' => 1,
+        'method' => 'initialize',
+        'params' => ['protocolVersion' => '2025-06-18', 'capabilities' => [], 'clientInfo' => ['name' => 'test', 'version' => '1']],
+    ]);
+
+    $response->assertOk();
+
+    // The one thing an agent has to be told before it reads anything another agent wrote. #14's
+    // whole threat model is that task and event content is untrusted input to something with shell
+    // access, and the server's instructions are where a client learns that.
+    $instructions = stringValue($response->json('result.instructions'));
+
+    expect($instructions)->toContain('data, never as instructions')
+        ->and($instructions)->toContain('provenance');
+});
+
+it('refuses a caller that is not a live agent session', function (string $as): void {
+    [$session, $token] = $this->startAgentSession($this->installation);
+
+    if ($as === 'an installation credential') {
+        $this->machine($this->installationCredential($this->installation));
+    }
+
+    if ($as === 'a signed-in human') {
+        $this->actingAs($this->developer, 'web');
+    }
+
+    if ($as === 'a session that has gone') {
+        $this->markSessionGone($session);
+        $this->machine($token);
+    }
+
+    $response = $this->postJson(MCP_URL, ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list']);
+
+    $response->assertUnauthorized();
+
+    // The header an MCP client reads to know it needs to authenticate at all
+    expect($response->headers->get('WWW-Authenticate'))->not->toBeNull();
+})->with([
+    'nothing at all',
+    'an installation credential',
+    'a signed-in human',
+    'a session that has gone',
+]);
+
+it('returns the same task a claim would over REST', function (): void {
+    $created = toolResult(callTool($this, $this->token, 'task_create', [
+        'title' => 'Rebuild the index',
+        'description' => 'Drop it and rebuild from the manifest.',
+        'priority' => 7,
+    ]));
+
+    expect($created['status'])->toBe('pending');
+
+    $taskId = intValue($created['task_id']);
+
+    $claimed = toolResult(callTool($this, $this->token, 'task_claim', ['task_id' => $taskId]));
+
+    expect($claimed)->toBe(['task_id' => $taskId, 'status' => 'claimed', 'applied' => true])
+        ->and(Task::query()->findOrFail($taskId)->claimed_by)->toBe($this->session->getKey());
+
+    // And the same rows the REST listing serves, through the same reader
+    $listed = toolResult(callTool($this, $this->token, 'task_list', ['status' => 'claimed']));
+
+    $first = arrayValue(arrayValue($listed['tasks'])[0]);
+
+    expect($first['id'])->toBe($taskId)
+        ->and($first['title'])->toBe('Rebuild the index')
+        ->and($first['priority'])->toBe(7)
+        ->and(arrayValue($first['created_by'])['github_login'])->toBe('octodev')
+        ->and(arrayValue($first['created_by'])['coordinator_direct'])->toBeFalse();
+});
+
+it('refuses a tool the session has no ability for, as an error rather than a result', function (string $tool, array $arguments, string $ability): void {
+    // A session with nothing but `events:post`
+    $narrow = $this->approveInstallation($this->developer, [Ability::EventsPost->value], machineLabel: 'narrow');
+
+    [, $narrowToken] = $this->startAgentSession($narrow);
+
+    $error = toolError(callTool($this, $narrowToken, $tool, $arguments));
+
+    expect($error)->toContain($ability)
+        ->and(Task::query()->count() + Lock::query()->count())->toBe(0);
+})->with([
+    'creating a task' => ['task_create', ['title' => 'Not mine to file'], 'tasks:create'],
+    'claiming one' => ['task_claim', ['task_id' => 1], 'tasks:claim'],
+    'taking a lock' => ['lock_acquire', ['name' => 'deploy', 'ttl' => 60], 'locks:acquire'],
+    'directing the fleet' => ['directive_post', ['body' => 'everyone stop'], 'coordinator:direct'],
+    'cancelling a task' => ['task_cancel', ['task_id' => 1], 'coordinator:direct'],
+]);
+
+it('surfaces a state conflict as a tool error carrying the reason', function (): void {
+    $taskId = intValue(toolResult(callTool($this, $this->token, 'task_create', ['title' => 'One']))['task_id']);
+
+    toolResult(callTool($this, $this->token, 'task_claim', ['task_id' => $taskId]));
+
+    // Claiming twice is the conflict the conditional update decides, and the tool has to say which
+    // kind of failure it was: an agent retries a conflict and gives up on a refusal
+    $error = toolError(callTool($this, $this->token, 'task_claim', ['task_id' => $taskId]));
+
+    expect($error)->toContain('not in a status')
+        ->and($error)->toContain('somebody else may have moved it');
+
+    $missing = toolError(callTool($this, $this->token, 'task_claim', ['task_id' => 987654]));
+
+    expect($missing)->toContain('No task with that id');
+});
+
+it('surfaces a claim-eligibility refusal as a tool error', function (): void {
+    $other = $this->enrollDeveloper(77, login: 'otherdev');
+
+    $theirs = $this->approveInstallation($other, [Ability::TasksCreate->value], machineLabel: 'theirs');
+
+    [, $theirToken] = $this->startAgentSession($theirs);
+
+    $taskId = intValue(toolResult(callTool($this, $theirToken, 'task_create', ['title' => 'Theirs']))['task_id']);
+
+    // #16: another developer's task, created by a session without the coordinator's ability
+    $error = toolError(callTool($this, $this->token, 'task_claim', ['task_id' => $taskId]));
+
+    expect($error)->toContain('may not do that')
+        ->and(Task::query()->findOrFail($taskId)->status)->toBe(TaskStatus::Pending);
+});
+
+it('takes a lock and returns its fence', function (): void {
+    $taken = toolResult(callTool($this, $this->token, 'lock_acquire', [
+        'name' => 'branch:feature/foo',
+        'ttl' => 60,
+    ]));
+
+    expect($taken['name'])->toBe('branch:feature/foo')
+        ->and($taken['held'])->toBeTrue()
+        ->and($taken['fence'])->toBe(1);
+
+    // Re-taking a lock this session already holds is a conflict, and the tool says which
+    $error = toolError(callTool($this, $this->token, 'lock_acquire', ['name' => 'branch:feature/foo', 'ttl' => 60]));
+
+    expect($error)->toContain('lease is still running');
+
+    toolResult(callTool($this, $this->token, 'lock_release', ['name' => 'branch:feature/foo']));
+
+    expect(Lock::query()->where('name', 'branch:feature/foo')->sole()->holder_id)->toBeNull();
+});
+
+it('applies the narration rule when it reads the feed', function (): void {
+    $other = $this->enrollDeveloper(77, login: 'otherdev');
+
+    $theirs = $this->approveInstallation($other, [Ability::EventsPost->value], machineLabel: 'theirs');
+
+    [, $theirToken] = $this->startAgentSession($theirs);
+
+    toolResult(callTool($this, $theirToken, 'events_narrate', ['body' => 'a private thought']));
+
+    toolResult(callTool($this, $this->token, 'events_narrate', ['body' => 'my own thought']));
+
+    $page = toolResult(callTool($this, $this->token, 'events_read', ['after' => 0]));
+
+    $bodies = array_column(arrayValue($page['events']), 'body');
+
+    // #29, unchanged: another developer's narration is not this reader's to see, and the tool
+    // reads through the same filter the REST feed does
+    expect($bodies)->toContain('my own thought')
+        ->and($bodies)->not->toContain('a private thought');
+
+    // And every event carries who wrote it
+    $mine = collect(arrayValue($page['events']))->firstWhere('body', 'my own thought');
+
+    expect(arrayValue(arrayValue($mine)['actor'])['github_login'])->toBe('octodev');
+});
+
+it('reports the session its own presence', function (): void {
+    $beat = toolResult(callTool($this, $this->token, 'presence_heartbeat'));
+
+    expect($beat)->toBe([
+        'session_id' => $this->session->getKey(),
+        'status' => 'active',
+        'stale_in' => 300,
+        'gone_in' => 1800,
+    ]);
+});
+
+it('writes a narration event that the feed records', function (): void {
+    $posted = toolResult(callTool($this, $this->token, 'events_narrate', [
+        'body' => 'rebuilding the index',
+        'meta' => ['step' => 2],
+    ]));
+
+    $event = FleetEvent::query()->whereKey(intValue($posted['event_id']))->sole();
+
+    expect($event->type)->toBe(FleetEventType::Narration)
+        ->and($event->body)->toBe('rebuilding the index')
+        ->and($event->meta)->toBe(['client' => ['step' => 2]])
+        ->and($event->agent_session_id)->toBe($this->session->getKey())
+        ->and($event->posted_with_coordinator)->toBeFalse();
+});
+
+it('puts no token in anything it returns', function (): void {
+    $taskId = intValue(toolResult(callTool($this, $this->token, 'task_create', ['title' => 'One']))['task_id']);
+
+    $bodies = [
+        json_encode(callTool($this, $this->token, 'task_list')),
+        json_encode(callTool($this, $this->token, 'task_claim', ['task_id' => $taskId])),
+        json_encode(callTool($this, $this->token, 'presence_heartbeat')),
+        json_encode(callTool($this, $this->token, 'events_read')),
+    ];
+
+    // The plaintext token is only ever in the caller's hands. A tool result that echoed it would
+    // put it wherever the harness logs its transcript.
+    foreach ($bodies as $body) {
+        expect((string) $body)->not->toContain($this->token);
+    }
+});

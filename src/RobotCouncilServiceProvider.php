@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
+use Laravel\Mcp\Facades\Mcp;
 use RobotCouncil\Access\Allowlist;
 use RobotCouncil\Access\ApiGuards;
 use RobotCouncil\Access\Guard;
@@ -24,6 +25,8 @@ use RobotCouncil\Console\RevokeAbilityCommand;
 use RobotCouncil\Console\RevokeInstallationCommand;
 use RobotCouncil\Console\RevokeSessionCommand;
 use RobotCouncil\Console\SweepSessionsCommand;
+use RobotCouncil\Http\Middleware\EnsureAgentSession;
+use RobotCouncil\Mcp\CouncilServer;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\Installation;
 use RobotCouncil\Support\Contracts\DrawsUserCodes;
@@ -261,6 +264,34 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
             ->prefix($apiPrefix)
             ->name('robot-council.')
             ->group(__DIR__.'/../routes/api.php');
+
+        $this->registerMcpServer($apiPrefix, $apiMiddleware);
+    }
+
+    /**
+     * Mount the MCP server beside the machine routes.
+     *
+     * Behind the same guard and principal middleware as every other agent route: `Mcp::web()`
+     * registers its own routes, so the middleware is applied to what it returns rather than
+     * declared around it. The agent middleware is what makes a tool call arrive as a session --
+     * `Http\Principal` refuses to hand a tool anything otherwise, so a server mounted without it
+     * fails loudly rather than serving the fleet's tools to whoever asked.
+     *
+     * `mcp:inspector` does not list this server while a host has cached its routes, because Laravel
+     * skips a package's route files then and this registration runs inside that same guard.
+     *
+     * @param  string  $prefix  The configured machine-route prefix.
+     * @param  array<int|string, mixed>  $middleware  The host's own machine middleware.
+     */
+    private function registerMcpServer(string $prefix, array $middleware): void
+    {
+        Mcp::web(trim($prefix, '/').'/mcp', CouncilServer::class)
+            ->middleware([
+                ...array_values(array_filter($middleware, \is_string(...))),
+                EnsureAgentSession::class,
+                'throttle:'.self::AGENT_LIMITER,
+            ])
+            ->name('robot-council.mcp');
     }
 
     /**

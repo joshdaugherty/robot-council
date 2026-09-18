@@ -249,6 +249,33 @@ check it, or run the loop over a file rather than a pipe.
  `scanned 0 bytes` is a failed read,
 not a clean result.
 
+**Run it on every pull request, and read the PR body — not just the commits.** Both halves of that
+sentence were paid for on the same day, months after the check above was written.
+
+On `robot-council/cli#2`, a one-line README change, the body opened
+*"Closes #1's first housekeeping item, and the last acceptance criterion of …"*. GitHub parses
+`Closes #1` and ignores the possessive that follows, so merging closed the repository's **epic**.
+Two things let it through:
+
+- **The PR was treated as too small to check.** It changed one sentence in a README. The check is
+  cheapest exactly there, and a trivial diff is no evidence about what its body says.
+- **A weakened variant was run in its place** — `git log origin/main..HEAD` alone, without the
+  `gh api …/pulls/<N> --jq '.title, .body'` half. That commit range contained **no closing keyword
+  at all**; the `Closes #1` existed only in the body. A squash merge composes its commit message
+  from the PR title and body, so the body is what GitHub reads. Scanning commits is scanning the
+  wrong text.
+
+**The possessive is the shape to watch**, because it reads as ordinary prose. Written with a real
+number, each of these closes the issue outright: `Closes #<N>'s first item`, `fixes #<N>'s
+regression`, `resolves #<N>'s open question`. Write `the first item of #<N>` instead, or reword so
+no keyword precedes the reference.
+
+**Those examples carry `#<N>` rather than a number for a reason.** Spelled with real ones, they
+would close those issues from this very file's own pull request -- and they did, on the first
+attempt at this change: the check flagged `#1`, `#4` and `#9` in the body of the pull request that
+adds this paragraph. A document about a trap is written in the trap's own syntax, which makes it the
+likeliest place to fall in. The same applies to the commit message, which a squash merge also reads.
+
 ## Bullets, headings, tables
 
 - Bullets are `-` only (never `*`). Nest with a 2-space indent.

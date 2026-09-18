@@ -6,6 +6,7 @@ namespace RobotCouncil\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Access\Tokens;
 use RobotCouncil\Http\Principal;
@@ -43,11 +44,11 @@ final class LockController
      */
     public function __invoke(Request $request, string $action, Locks $locks, Credentials $credentials): JsonResponse
     {
-        $move = LockAction::tryFrom($action);
-
-        if (! $move instanceof LockAction) {
-            throw new AccessDeniedHttpException;
-        }
+        // The route's constraint is built from the enum, so only the four segments reach here and
+        // no request can take this branch. It stays because the signature is `string`, and a route
+        // registered by hand elsewhere would otherwise reach the store with nothing checked.
+        // @pest-mutate-ignore
+        $move = LockAction::tryFrom($action) ?? throw new AccessDeniedHttpException;
 
         $session = Principal::agentSession($request);
         $token = $session->currentAccessToken();
@@ -57,9 +58,16 @@ final class LockController
         }
 
         $request->validate([
-            // Printable ASCII, so a name cannot carry a control character or an escape sequence
-            // into a feed body that every agent reads
-            'name' => ['required', 'string', 'max:'.Lock::MAX_NAME, 'regex:/^[\x20-\x7E]+$/D'],
+            // The same narrow set every other agent-facing identifier carries, plus `:` and `/`
+            // because `branch:feature/foo` is the kind of name worth locking. Printable ASCII was
+            // not enough: a lock name goes into a feed event body that reaches every agent in the
+            // fleet, and `locks:acquire` is an ability enrollment can ask for -- so 191 bytes of
+            // arbitrary prose would be a cross-developer channel that routes around the
+            // coordinator's ability, which is the one thing that is never requestable.
+            //
+            // The `D` modifier is load-bearing: without it `$` also matches before a trailing
+            // newline, and a newline would reach that body.
+            'name' => ['required', 'string', 'max:'.Lock::MAX_NAME, 'regex:/^[A-Za-z0-9._:\/-]+$/D'],
 
             'ttl' => $move->takesATtl()
                 ? ['required', 'integer', 'min:1', 'max:'.$credentials->lockMaxTtlSeconds()]
@@ -86,7 +94,14 @@ final class LockController
             // against, and the duration is what a helper on a machine with a wrong clock can use.
             'fence' => $lock?->fence,
             'expires_at' => $lock?->expires_at?->toIso8601String(),
-            'expires_in' => $lock?->expires_at === null ? null : $request->integer('ttl'),
+
+            // Derived from the lease rather than echoed from the request. The time spent taking the
+            // lock row and the feed sentinel is inside the lease and outside the number the caller
+            // asked for, so echoing the TTL would always be at least a little long -- and a helper
+            // scheduling its renewal from it would schedule after the lease had lapsed.
+            'expires_in' => $lock?->expires_at === null
+                ? null
+                : max(0, Carbon::now()->diffInSeconds($lock->expires_at, false)),
         ], static fn (mixed $value): bool => $value !== null), $result['outcome']->status());
     }
 }

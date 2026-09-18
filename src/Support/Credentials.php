@@ -162,24 +162,27 @@ final class Credentials
     /**
      * The longest lease a lock may be given or renewed for.
      *
+     * Never longer than the hold ceiling. A host that configured a lease longer than the total
+     * hold would otherwise advertise a maximum in the 422 that the 409 then refuses: a lock taken
+     * at that lease could never be renewed, because the first renewal already exceeds the ceiling.
+     * The lease comes down rather than the ceiling going up, so `max_hold_seconds` keeps meaning
+     * what it says and the number the API advertises is one it will actually accept.
+     *
      * @return int The ceiling in seconds, at least one.
      */
     public function lockMaxTtlSeconds(): int
     {
-        return $this->bounded('locks.max_ttl_seconds', 900);
+        return min($this->bounded('locks.max_ttl_seconds', 900), $this->lockMaxHoldSeconds());
     }
 
     /**
      * The longest one session may hold one name, measured from when it first acquired it.
      *
-     * Never shorter than a single lease, or the first renewal of a lock taken at the maximum TTL
-     * would be refused for exceeding a ceiling it was already at.
-     *
-     * @return int The ceiling in seconds.
+     * @return int The ceiling in seconds, at least one.
      */
     public function lockMaxHoldSeconds(): int
     {
-        return max($this->bounded('locks.max_hold_seconds', 14400), $this->lockMaxTtlSeconds());
+        return $this->bounded('locks.max_hold_seconds', 14400);
     }
 
     /**

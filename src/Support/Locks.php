@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\AgentSessionStatus;
 use RobotCouncil\Models\FleetEventType;
@@ -40,6 +41,17 @@ use Throwable;
 final class Locks
 {
     /**
+     * What a lock name may contain. Kept beside the controller's rule rather than only in it,
+     * because this service is public and other slices call it directly.
+     */
+    public const string NAME = '/^[A-Za-z0-9._:\/-]+$/D';
+
+    /**
+     * How many times a contended write is retried before it is reported.
+     */
+    private const int ATTEMPTS = 3;
+
+    /**
      * @param  Credentials  $credentials  The configured bounds.
      * @param  FleetEvents  $events  The change feed.
      */
@@ -59,8 +71,24 @@ final class Locks
      */
     public function acquire(AgentSession $session, string $name, int $ttl, bool $asCoordinator): array
     {
+        // Checked here as well as in the controller, because this is a public method on an
+        // injectable service and the drivers disagree about what an over-long name does: MySQL's
+        // `insert ignore` silently truncates it -- so every later lookup by the full name misses,
+        // leaving a junk row and a permanent conflict -- while Postgres raises and SQLite stores it.
+        if ($name === '' || \strlen($name) > Lock::MAX_NAME || preg_match(self::NAME, $name) !== 1) {
+            throw new InvalidArgumentException('A lock name must be 1 to 191 characters of [A-Za-z0-9._:/-].');
+        }
+
+        // Retried, because the contended case is what this method is for. A deadlock or a lock-wait
+        // timeout rolls the whole transaction back, so a retry starts from a clean slate.
         return DB::transaction(function () use ($session, $name, $ttl, $asCoordinator): array {
             $now = Carbon::now();
+
+            // The session row first, which is the package's lock order and is also what makes the
+            // cap below hold. Counting without it is a plain read against rows keyed by `name`,
+            // and two acquisitions from one session never touch the same row -- so both would
+            // count the same number and both would pass a cap neither was under.
+            AgentSession::query()->whereKey($session->getKey())->lockForUpdate()->first();
 
             // Counted inside the transaction, against live leases only: a session that holds
             // twenty names whose leases have all lapsed is holding nothing
@@ -73,18 +101,29 @@ final class Locks
                 return ['outcome' => Outcome::Conflict, 'lock' => null];
             }
 
-            // The row may not exist yet, and two sessions may be here at once. Ignoring the unique
-            // conflict is what makes that a no-op rather than an error -- and the input was
-            // validated before this, because SQLite's `insert or ignore` swallows a NOT NULL or
-            // CHECK violation too, which would otherwise read as somebody else having won.
-            Lock::query()->insertOrIgnore([
-                'name' => $name,
-                'fence' => 0,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]);
+            // Only when the row is not there yet. Ignoring the unique conflict is what makes two
+            // sessions creating one name at once a no-op rather than an error, but issuing it on
+            // every acquisition is what makes the contended case deadlock: InnoDB gives a plain
+            // insert that hits a duplicate key a SHARED lock on that record, so two acquisitions
+            // of an existing name both take S and then both need X, and one of them is killed.
+            // Checking first leaves that window only on a name's first-ever creation.
+            //
+            // The input was validated before any of this, because SQLite's `insert or ignore`
+            // swallows a NOT NULL or CHECK violation too -- and MySQL's `insert ignore` swallows
+            // truncation on top of that -- which would otherwise read as somebody else having won.
+            if (! Lock::query()->where('name', $name)->exists()) {
+                Lock::query()->insertOrIgnore([
+                    'name' => $name,
+                    'fence' => 0,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            }
 
-            $before = Lock::query()->where('name', $name)->first();
+            // Locked, so the event's type and `taken_from` describe the row the update is about
+            // to change rather than one that moved in between. Same row and the same order as the
+            // update, so it adds no ordering edge.
+            $before = Lock::query()->where('name', $name)->lockForUpdate()->first();
 
             $taken = Lock::query()
                 ->where('name', $name)
@@ -92,6 +131,11 @@ final class Locks
                     ->whereNull('holder_id')
                     ->orWhere('expires_at', '<=', $now))
                 ->update([
+                    // Before `holder_id`, and the order matters: MySQL evaluates a SET clause left
+                    // to right, so this has to read the old holder before the next line overwrites
+                    // it. Postgres and SQLite evaluate every right-hand side against the pre-update
+                    // row, so they agree either way.
+                    'previous_holder_id' => DB::raw('holder_id'),
                     'holder_id' => $session->getKey(),
 
                     // In the same statement that takes it, so no two acquisitions can read the
@@ -125,7 +169,7 @@ final class Locks
             );
 
             return ['outcome' => Outcome::Applied, 'lock' => $lock];
-        });
+        }, self::ATTEMPTS);
     }
 
     /**
@@ -156,7 +200,24 @@ final class Locks
                 ->update(['expires_at' => $until, 'updated_at' => $now]);
 
             if ($renewed !== 1) {
-                return ['outcome' => $this->diagnose($name, $session, $now), 'lock' => null];
+                // A renewal can change nothing and still be right. MySQL's `update()` reports rows
+                // it CHANGED rather than rows it matched -- Laravel sets no `MYSQL_ATTR_FOUND_ROWS`
+                // and reads `PDOStatement::rowCount()` -- and these columns are second-precision,
+                // so renewing within the same second as the last write is a no-op on a row that
+                // already says what was asked for. Reading that as a lost lease would tell a
+                // holder that still holds the lock to abandon whatever it was guarding.
+                $already = Lock::query()->where('name', $name)->lockForUpdate()->first();
+
+                $satisfied = $already instanceof Lock
+                    && $already->holder_id === $session->getKey()
+                    && $already->expires_at instanceof Carbon
+                    && $already->expires_at->greaterThanOrEqualTo($until);
+
+                if (! $satisfied) {
+                    return ['outcome' => $this->diagnose($name, $session, $now), 'lock' => null];
+                }
+
+                return ['outcome' => Outcome::Applied, 'lock' => $already];
             }
 
             $lock = Lock::query()->where('name', $name)->sole();
@@ -222,7 +283,9 @@ final class Locks
         return DB::transaction(function () use ($session, $name): Outcome {
             $now = Carbon::now();
 
-            $lock = Lock::query()->where('name', $name)->first();
+            // Locked, so `taken_from` names the session the write is about to displace rather
+            // than one that released voluntarily a moment earlier
+            $lock = Lock::query()->where('name', $name)->lockForUpdate()->first();
 
             if (! $lock instanceof Lock) {
                 return Outcome::NotFound;
@@ -342,13 +405,28 @@ final class Locks
      */
     private function diagnose(string $name, AgentSession $session, Carbon $now): Outcome
     {
+        // Read unlocked first. A locking read that matches nothing takes a gap lock on InnoDB, and
+        // this runs on an ordinary client mistake -- a renew or release of a name that was never
+        // created -- with the gap chosen by whatever the caller sent.
+        if (! Lock::query()->where('name', $name)->exists()) {
+            return Outcome::NotFound;
+        }
+
         $lock = Lock::query()->where('name', $name)->lockForUpdate()->first();
 
         if (! $lock instanceof Lock || $lock->acquired_at === null) {
             return Outcome::NotFound;
         }
 
-        // Somebody else holds a running lease: this session may not touch it
+        // A session this lock was taken from is not a stranger to it. 409 rather than 403,
+        // because the useful thing to tell it is that what it held is gone -- which is what sends
+        // it to acquire the name again rather than give up on it. Recorded by the takeover's own
+        // write, so this costs no extra read and cannot disagree with what happened.
+        if ($lock->previous_holder_id === $session->getKey()) {
+            return Outcome::Conflict;
+        }
+
+        // Somebody else holds a running lease, and this session never held it: it may not touch it
         if ($lock->isHeldAt($now) && $lock->holder_id !== $session->getKey()) {
             return Outcome::Forbidden;
         }

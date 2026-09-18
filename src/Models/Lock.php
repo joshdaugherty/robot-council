@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace RobotCouncil\Models;
 
-use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
@@ -20,21 +18,18 @@ use Illuminate\Support\Carbon;
  * A row with a null `holder_id` is a free name that has been held before, and it is kept for the
  * fence it carries.
  *
+ * Nothing mass-assigns this model. Every write is an `insertOrIgnore` or a conditional `update`
+ * with a literal array, both of which bypass fillability, so there is no `#[Fillable]` to keep
+ * honest.
+ *
  * @property int $id
  * @property string $name
  * @property int|null $holder_id
+ * @property int|null $previous_holder_id
  * @property int $fence
  * @property Carbon|null $acquired_at
  * @property Carbon|null $expires_at
- * @property-read AgentSession|null $holder
  */
-#[Fillable([
-    'name',
-    'holder_id',
-    'fence',
-    'acquired_at',
-    'expires_at',
-])]
 #[Table(name: 'robot_council_locks')]
 final class Lock extends Model
 {
@@ -55,20 +50,11 @@ final class Lock extends Model
     {
         return [
             'holder_id' => 'integer',
+            'previous_holder_id' => 'integer',
             'fence' => 'integer',
             'acquired_at' => 'datetime',
             'expires_at' => 'datetime',
         ];
-    }
-
-    /**
-     * The session holding this lock, while one does.
-     *
-     * @return BelongsTo<AgentSession, $this> The holder.
-     */
-    public function holder(): BelongsTo
-    {
-        return $this->belongsTo(AgentSession::class, 'holder_id');
     }
 
     /**

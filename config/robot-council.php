@@ -169,8 +169,11 @@ return [
     |
     | `max_hold_seconds` is the ceiling a renewal cannot push a lease past,
     | measured from when it was first acquired, so a session cannot hold one
-    | name forever by renewing. `max_per_session` bounds how many one session
-    | can hold at once.
+    | name forever by renewing. It is the outer bound: a `max_ttl_seconds`
+    | longer than it is read as equal to it, so the longest lease the API
+    | advertises is one a renewal can actually be granted. Re-acquiring a name
+    | after letting it lapse starts a new hold, with a new fence.
+    | `max_per_session` bounds how many one session can hold at once.
     |
     */
 

@@ -72,6 +72,13 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
   it: PHP warns that the statement has no effect, and the run fails. Read `$?`, and never take a
   green reading from a command whose output went through a pipe, which throws the status away. To
   find what a silent failure was, run with `--log-events-text` and grep for `Triggered`.
+- **`Builder::update()` returns rows CHANGED, not rows matched, on MySQL.** Laravel sets no
+  `MYSQL_ATTR_FOUND_ROWS` (zero occurrences in the framework) and reads `PDOStatement::rowCount()`,
+  so a conditional update whose `where` matched a row that already says what was asked for reports
+  **0** there and **1** on SQLite and Postgres. Every store in this package decides with
+  `$changed !== 1`, so any write that can legitimately be a no-op needs a second look before it is
+  read as a lost race: `Locks::renew()` inside one second is the case that bites, and its regression
+  test cannot fail on SQLite for the same reason.
 - **`composer.lock` is gitignored.** Every CI run and every fresh install resolves dependencies anew, so an unchanged branch can go red later. Compare resolved versions before blaming a diff (see `measurement-parity`).
 - **CI is one workflow with one required check.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to `main`, with no path filters:
   - `tests` runs `vendor/bin/pest --ci` on ubuntu and windows × PHP 8.5 and 8.4 × Laravel 13 × `prefer-lowest` and `prefer-stable`, with `fail-fast: false`, on Pest 5 and PHPUnit 13.

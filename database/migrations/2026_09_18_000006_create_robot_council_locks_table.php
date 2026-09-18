@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -31,8 +32,21 @@ return new class extends Migration
             $table->id();
 
             // 191 rather than 255: this is the unique key, and 191 is the longest a `varchar` can
-            // be under MySQL's utf8mb4 with the older 767-byte index limit
-            $table->string('name', 191)->unique();
+            // be under MySQL's utf8mb4 with the older 767-byte index limit.
+            //
+            // The collation is not decoration. This column IS the mutual exclusion, and MySQL's
+            // default `utf8mb4_0900_ai_ci` compares case- and accent-insensitively -- so
+            // `branch:Main` and `branch:main` would be two locks on Postgres and SQLite and one on
+            // MySQL, and the supported databases would disagree about whether two agents are
+            // guarding the same thing. Binary on MySQL makes all three agree; the other two
+            // compare bytes already, and neither accepts MySQL's collation names.
+            $name = $table->string('name', 191);
+
+            if (DB::getDriverName() === 'mysql') {
+                $name->collation('utf8mb4_bin');
+            }
+
+            $table->unique('name');
 
             // Null while the lock is free. Indexed explicitly, because `constrained()` emits no
             // index on Postgres or SQLite and the release step queries this column.
@@ -45,6 +59,13 @@ return new class extends Migration
             // Monotonic per name, and never reset. A guarded action carries the fence it was given
             // and can be refused by whatever it is guarding once a higher one exists.
             $table->unsignedBigInteger('fence')->default(0);
+
+            // Who the lock was taken from, set by the takeover's own write. It is what lets a
+            // displaced holder be told its lease is gone rather than that it was never entitled.
+            $table->foreignId('previous_holder_id')
+                ->nullable()
+                ->constrained('robot_council_agent_sessions')
+                ->nullOnDelete();
 
             // `dateTime` rather than `timestamp`, for the reason the sessions table records: MySQL
             // gives the first NOT NULL `TIMESTAMP` column an implicit `ON UPDATE CURRENT_TIMESTAMP`

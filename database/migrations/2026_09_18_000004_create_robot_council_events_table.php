@@ -97,23 +97,18 @@ return new class extends Migration
             // branch can be walked in feed order without a sort. #48 decided these ship now, on
             // `agent_session_id`; #59 moved the first to `user_id` when the filter's branch moved.
             //
-            // **No query in this package can use them today, and that is deliberate.**
-            // `FleetFeed::after()` reads in two phases: a primary-key range scan picks a window of
-            // at most `MAX_PAGE` ids, then the visibility filter runs as a residual predicate over
-            // `whereKey($window)`. The filter never drives an access path, because the row set is
-            // already pinned by the primary key -- measured with `EXPLAIN QUERY PLAN` on a seeded
-            // SQLite fixture, where all four of the package's queries plan identically with these
-            // indexes present and absent. What they are provisioned for is the `UNION ALL` of two
-            // index-backed branches that robot-council/core#62 may adopt, which is why #62 lists
-            // "neither" among its candidates. Until it decides, this is write cost paid forward.
+            // **No secondary index, and robot-council/core#62 measured that rather than assuming
+            // it.** `(user_id, id)` and `(type, id)` shipped in #48 on the expectation that the
+            // filter's branches would use them. They were used by none of the shapes measured on a
+            // million-event feed: dropping both left the plan and the buffer count identical, and
+            // the shape that was adopted still plans on the primary key. On an append-only feed
+            // that is two index writes per event buying nothing.
             //
-            // `posted_with_coordinator` gets none, and not because it is unselective: it is written
-            // `true` in one place only, so it is rare rather than half, which is the distribution a
-            // partial index suits. It stays a filter because it reaches the query only as one
-            // disjunct of an `OR` over a window already pinned by primary key, where no index on it
-            // could be reached at all.
-            $table->index(['user_id', 'id']);
-            $table->index(['type', 'id']);
+            // The read is a capped range scan on the primary key, with the visibility rule running
+            // as a residual predicate over rows the scan already pinned -- so the filter never
+            // drives an access path and no index on its columns could be reached.
+            // `posted_with_coordinator` gets none for the same reason, and would not suit one
+            // anyway: it is written `true` in one place only, so it is rare rather than half.
         });
     }
 

@@ -12,14 +12,17 @@ declare(strict_types=1);
  * @command  vendor/bin/pest --compact tests/FleetEventFeedTest.php
  */
 
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\FleetEvent;
 use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Support\FleetEvents;
+use RobotCouncil\Support\FleetFeed;
 use RobotCouncil\Tests\TestCase;
 
 beforeEach(function (): void {
@@ -592,10 +595,14 @@ it("does not let a reused session id hand one developer another developer's narr
     expect(arrayValue(arrayValue($orphaned)['actor'])['github_login'])->toBe('otherdev');
 });
 
-it('indexes the branch a reader is filtered on, and nothing redundant beside it', function (): void {
-    // Asserted on the schema rather than on a plan: a plan needs a seeded feed and two engines,
-    // which is #62. What the schema can say is which indexes exist, and that matters in both
-    // directions -- an index on a column nothing filters by is write cost on an append-only feed.
+it('carries no secondary index at all, which robot-council/core#62 measured rather than assumed', function (): void {
+    // `(user_id, id)` and `(type, id)` shipped in #48 on the expectation that the filter's branches
+    // would use them, and #62 measured that they do not: on a million-event feed, dropping both
+    // left the plan and the buffer count identical, and the shape that was adopted still plans on
+    // the primary key. On an append-only feed that was two index writes per event buying nothing.
+    //
+    // Asserted on the schema rather than on a plan, because a plan needs a seeded feed and two
+    // engines. What the schema can say is which indexes exist, and that matters in both directions.
     //
     // Lower-cased because the engine decides the case it reports identifiers in, and this assertion
     // has to mean the same thing on SQLite, Postgres and MySQL.
@@ -607,19 +614,232 @@ it('indexes the branch a reader is filtered on, and nothing redundant beside it'
         Schema::getIndexes('robot_council_events'),
     );
 
-    expect($indexes)->toContain(['user_id', 'id'])
-        ->toContain(['type', 'id'])
-
-        // Each composite's leftmost column, which the composite already serves
+    expect($indexes)->not->toContain(['user_id', 'id'])
+        ->and($indexes)->not->toContain(['type', 'id'])
         ->and($indexes)->not->toContain(['user_id'])
         ->and($indexes)->not->toContain(['type'])
 
-        // `agent_session_id` is stored for provenance and filtered by nothing, so it carries no
-        // index in either shape. #48 put the composite here; #59 moved it to `user_id` with the
-        // filter branch that reads it.
+        // `agent_session_id` is stored for provenance and filtered by nothing
         ->and($indexes)->not->toContain(['agent_session_id'])
         ->and($indexes)->not->toContain(['agent_session_id', 'id'])
-
-        // And an index nobody asked for, so `not->toContain` is shown to be capable of failing
         ->and($indexes)->not->toContain(['posted_with_coordinator', 'id']);
+
+    // **The positive control, without which every assertion above passes on a table that does not
+    // exist.** The primary key is the one index this table does carry, and it is what the capped
+    // read scans, so finding it proves the instrument can see an index at all.
+    expect($indexes)->toContain(['id']);
+});
+
+it('fills a page rather than returning what one window of ids happened to contain', function (): void {
+    // The pathology robot-council/core#62 measured: a reader seeing about a third of the feed got
+    // 65 rows out of every 200-id window, so filling a page took roughly four round trips. The cap
+    // is what makes one call enough.
+    [$mine, $mineToken] = sessionFor($this, $this->mine, [Ability::EventsPost->value]);
+    [$theirs] = sessionFor($this, $this->theirs, [Ability::EventsPost->value]);
+
+    $cursor = intValue($this->machine($mineToken)->getJson(route('robot-council.events.index'))->json('cursor'));
+
+    // Two of every three events are another developer's narration, which this reader cannot see
+    $rows = [];
+
+    foreach (range(1, 90) as $n) {
+        $theirsTurn = $n % 3 !== 0;
+
+        $rows[] = [
+            'agent_session_id' => $theirsTurn ? $theirs->id : $mine->id,
+            'user_id' => $theirsTurn ? $theirs->user_id : $mine->user_id,
+            'type' => FleetEventType::Narration->value,
+            'body' => 'seeded '.$n,
+            'posted_with_coordinator' => false,
+            'created_at' => now(),
+        ];
+    }
+
+    FleetEvent::query()->insert($rows);
+
+    $page = $this->machine($mineToken)
+        ->getJson(route('robot-council.events.index', ['after' => $cursor, 'limit' => 30]))
+        ->assertOk();
+
+    // 30 of this reader's own, in one call, out of 90 ids examined. Before the reshape a 30-id
+    // window would have returned 10.
+    expect(arrayValue($page->json('events')))->toHaveCount(30);
+});
+
+it('advances the cursor through a long run of events it cannot see, in one call', function (): void {
+    // The case the cap exists for, and the one the old shape walked four rows at a time. Nothing
+    // here is visible to the reader, so there is no page to return -- only a cursor that has to
+    // move, and move past everything examined rather than one window of it.
+    [, $mineToken] = sessionFor($this, $this->mine, [Ability::EventsPost->value]);
+    [$theirs] = sessionFor($this, $this->theirs, [Ability::EventsPost->value]);
+
+    $cursor = intValue($this->machine($mineToken)->getJson(route('robot-council.events.index'))->json('cursor'));
+
+    $rows = [];
+
+    foreach (range(1, 400) as $n) {
+        $rows[] = [
+            'agent_session_id' => $theirs->id,
+            'user_id' => $theirs->user_id,
+            'type' => FleetEventType::Narration->value,
+            'body' => 'theirs '.$n,
+            'posted_with_coordinator' => false,
+            'created_at' => now(),
+        ];
+    }
+
+    FleetEvent::query()->insert($rows);
+
+    $highest = intValue(FleetEvent::query()->max('id'));
+
+    $page = $this->machine($mineToken)
+        ->getJson(route('robot-council.events.index', ['after' => $cursor]))
+        ->assertOk();
+
+    // Empty, and caught up in one call rather than in twenty. The cursor is the highest id
+    // EXAMINED, which is the whole of the run, not the highest id returned -- of which there is
+    // none.
+    expect(arrayValue($page->json('events')))->toBeEmpty()
+        ->and(intValue($page->json('cursor')))->toBe($highest);
+});
+
+it('stops at the examination cap rather than scanning the feed', function (): void {
+    // The cap is the bound that keeps one call's cost independent of how busy everyone else is.
+    // Asserted by making the run longer than the cap and showing the cursor stops inside it.
+    [, $mineToken] = sessionFor($this, $this->mine, [Ability::EventsPost->value]);
+    [$theirs] = sessionFor($this, $this->theirs, [Ability::EventsPost->value]);
+
+    $cursor = intValue($this->machine($mineToken)->getJson(route('robot-council.events.index'))->json('cursor'));
+
+    $rows = [];
+
+    foreach (range(1, FleetFeed::EXAMINE_CAP + 50) as $n) {
+        $rows[] = [
+            'agent_session_id' => $theirs->id,
+            'user_id' => $theirs->user_id,
+            'type' => FleetEventType::Narration->value,
+            'body' => 'theirs '.$n,
+            'posted_with_coordinator' => false,
+            'created_at' => now(),
+        ];
+    }
+
+    FleetEvent::query()->insert($rows);
+
+    $page = $this->machine($mineToken)
+        ->getJson(route('robot-council.events.index', ['after' => $cursor]))
+        ->assertOk();
+
+    $reached = intValue($page->json('cursor'));
+
+    expect(arrayValue($page->json('events')))->toBeEmpty()
+        // Exactly the cap's worth of ids, and not one more
+        ->and($reached - $cursor)->toBe(FleetFeed::EXAMINE_CAP)
+        ->and($reached)->toBeLessThan(intValue(FleetEvent::query()->max('id')));
+
+    // And the next call picks up where it stopped, so the run is still drained -- just in bounded
+    // steps rather than one unbounded scan
+    $next = $this->machine($mineToken)
+        ->getJson(route('robot-council.events.index', ['after' => $reached]))
+        ->assertOk();
+
+    expect(intValue($next->json('cursor')))->toBe(intValue(FleetEvent::query()->max('id')));
+});
+
+it('reads the feed in one query rather than two', function (): void {
+    // The criterion robot-council/core#94 states, asserted by counting rather than by reading the
+    // code. Only statements touching the events table are counted: resolving the reader's session
+    // and looking up GitHub logins are separate concerns with their own queries.
+    [$mine, $mineToken] = sessionFor($this, $this->mine, [Ability::EventsPost->value]);
+    [$theirs] = sessionFor($this, $this->theirs, [Ability::EventsPost->value]);
+
+    $rows = [];
+
+    foreach (range(1, 60) as $n) {
+        $theirsTurn = $n % 2 === 0;
+
+        $rows[] = [
+            'agent_session_id' => $theirsTurn ? $theirs->id : $mine->id,
+            'user_id' => $theirsTurn ? $theirs->user_id : $mine->user_id,
+            'type' => FleetEventType::Narration->value,
+            'body' => 'seeded '.$n,
+            'posted_with_coordinator' => false,
+            'created_at' => now(),
+        ];
+    }
+
+    FleetEvent::query()->insert($rows);
+
+    $reads = [];
+
+    DB::listen(function (QueryExecuted $query) use (&$reads): void {
+        if (str_starts_with(strtolower(ltrim($query->sql)), 'select') && str_contains($query->sql, 'robot_council_events')) {
+            $reads[] = $query->sql;
+        }
+    });
+
+    $page = app(FleetFeed::class)->after(AgentSession::query()->whereKey($mine->id)->sole(), 0, 30);
+
+    expect($reads)->toHaveCount(1)
+        ->and(arrayValue($page['events']))->not->toBeEmpty();
+
+    // The control: the single statement really does carry both the window and the filter, rather
+    // than the count being one because the read was skipped
+    expect($reads[0])->toContain('robot_council_events')
+        ->and($reads[0])->toContain('limit');
+});
+
+it('takes the cursor past invisible events trailing a short page, not to the last row it returned', function (): void {
+    // **The detail robot-council/core#94 says decides correctness, and the one a passing suite can
+    // miss.** A short page that returned something is the only shape that tells the two rules
+    // apart: with an empty page both answers coincide, and with a full page both are the last row.
+    // Here two visible events are followed by invisible ones, so "highest id returned" would leave
+    // the reader re-examining that tail on every poll -- silently, because the events returned are
+    // identical either way.
+    [$mine, $mineToken] = sessionFor($this, $this->mine, [Ability::EventsPost->value]);
+    [$theirs] = sessionFor($this, $this->theirs, [Ability::EventsPost->value]);
+
+    $cursor = intValue($this->machine($mineToken)->getJson(route('robot-council.events.index'))->json('cursor'));
+
+    $rows = [];
+
+    // Two this reader may see, then a run it may not
+    foreach (range(1, 12) as $n) {
+        $ours = $n <= 2;
+
+        $rows[] = [
+            'agent_session_id' => $ours ? $mine->id : $theirs->id,
+            'user_id' => $ours ? $mine->user_id : $theirs->user_id,
+            'type' => FleetEventType::Narration->value,
+            'body' => 'seeded '.$n,
+            'posted_with_coordinator' => false,
+            'created_at' => now(),
+        ];
+    }
+
+    FleetEvent::query()->insert($rows);
+
+    $highest = intValue(FleetEvent::query()->max('id'));
+
+    $page = $this->machine($mineToken)
+        ->getJson(route('robot-council.events.index', ['after' => $cursor, 'limit' => 30]))
+        ->assertOk();
+
+    $events = arrayValue($page->json('events'));
+
+    expect($events)->toHaveCount(2);
+
+    $lastReturned = intValue(arrayValue($events[1])['id']);
+
+    // The cursor is past the whole examined run, which is strictly beyond the last row returned
+    expect(intValue($page->json('cursor')))->toBe($highest)
+        ->and($highest)->toBeGreaterThan($lastReturned);
+
+    // And the next poll has nothing left to do, rather than re-walking the invisible tail
+    $again = $this->machine($mineToken)
+        ->getJson(route('robot-council.events.index', ['after' => $highest]))
+        ->assertOk();
+
+    expect(arrayValue($again->json('events')))->toBeEmpty()
+        ->and(intValue($again->json('cursor')))->toBe($highest);
 });

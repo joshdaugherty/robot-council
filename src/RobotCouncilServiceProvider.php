@@ -31,6 +31,7 @@ use RobotCouncil\Http\Controllers\DashboardStylesheetController;
 use RobotCouncil\Http\Middleware\DenyFraming;
 use RobotCouncil\Http\Middleware\EnsureAgentSession;
 use RobotCouncil\Http\Middleware\EnsureAllowlistedDeveloper;
+use RobotCouncil\Livewire\TaskBoard;
 use RobotCouncil\Mcp\CouncilServer;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\Installation;
@@ -284,6 +285,10 @@ final class RobotCouncilServiceProvider extends PackageServiceProvider
         // removed from the access list keeps driving components from a page already open. Every
         // dashboard slice mounts inside one, so this is registered with the routes rather than
         // beside the component it happens to protect first.
+        // Named so the dashboard page can mount them, and prefixed so a host's own component of the
+        // same name is not shadowed -- the failure that ruled out a Blade component library on #30.
+        Livewire::component('robot-council-task-board', TaskBoard::class);
+
         Livewire::addPersistentMiddleware([
             EnsureAllowlistedDeveloper::class,
             DenyFraming::class,

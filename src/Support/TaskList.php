@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RobotCouncil\Support;
 
 use Illuminate\Contracts\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use RobotCouncil\Models\AgentSession;
 use RobotCouncil\Models\Task;
 use RobotCouncil\Models\TaskStatus;
@@ -65,7 +66,85 @@ final class TaskList
         bool $asCoordinator,
         ?array $after = null
     ): array {
-        $tasks = Task::query()
+        $tasks = $this->queue($status, $limit, $after);
+
+        $logins = $this->logins->forSessions([
+            ...$tasks->pluck('created_by')->all(),
+            ...$tasks->pluck('claimed_by')->all(),
+        ]);
+
+        $last = $tasks->last();
+
+        return [
+            'tasks' => array_values(array_map(
+                // The same audience #16 decided may act on this task, plus a coordinator, which is
+                // the pair #29 uses for narration. Everyone else is told the task exists and not
+                // what it says.
+                fn (Task $task): array => $this->describe(
+                    $task,
+                    $logins,
+                    $asCoordinator || $task->isClaimableBy($reader)
+                ),
+                $tasks->all()
+            )),
+            'cursor' => $last instanceof Task ? ['priority' => $last->priority, 'id' => $last->id] : null,
+        ];
+    }
+
+    /**
+     * The whole queue, with every task's content, for a signed-in developer.
+     *
+     * **Named rather than flagged, and taking no session, deliberately.** The redaction `page()`
+     * applies is a prompt-injection control: an agent that cannot act on a task should not read text
+     * that might instruct it. A human reading a dashboard is not vulnerable that way, and a
+     * supervisor who cannot read the queue is not supervising -- the decision on
+     * robot-council/core#73. But a `bool $unfiltered` parameter on `page()` is exactly the shape
+     * that is later passed `true` from an agent path by mistake, so this is a separate method whose
+     * name says what it is and which cannot be reached by an agent-facing call at all.
+     *
+     * The caller is responsible for having established that the reader is an allowlisted developer.
+     * Nothing here checks that, because nothing here can: there is no session to ask.
+     *
+     * @param  TaskStatus|null  $status  The status to show, or null for every task.
+     * @param  int  $limit  How many to return, clamped to `MAX_PAGE`.
+     * @param  array{priority: int, id: int}|null  $after  The last row the reader has seen.
+     * @return array{tasks: list<array<string, mixed>>, cursor: array{priority: int, id: int}|null}
+     *                                                                                              The page, and where to read from next.
+     */
+    public function everything(?TaskStatus $status, int $limit, ?array $after = null): array
+    {
+        $tasks = $this->queue($status, $limit, $after);
+
+        $logins = $this->logins->forSessions([
+            ...$tasks->pluck('created_by')->all(),
+            ...$tasks->pluck('claimed_by')->all(),
+        ]);
+
+        $last = $tasks->last();
+
+        return [
+            'tasks' => array_values(array_map(
+                fn (Task $task): array => $this->describe($task, $logins, readable: true),
+                $tasks->all()
+            )),
+            'cursor' => $last instanceof Task ? ['priority' => $last->priority, 'id' => $last->id] : null,
+        ];
+    }
+
+    /**
+     * One page of the queue, in the order the queue is read.
+     *
+     * Shared by both readers, so the ordering and the keyset predicate cannot drift between what an
+     * agent pages through and what a developer sees.
+     *
+     * @param  TaskStatus|null  $status  The status to filter to, or null for every task.
+     * @param  int  $limit  How many to return, clamped to `MAX_PAGE`.
+     * @param  array{priority: int, id: int}|null  $after  The last row the reader has seen.
+     * @return Collection<int, Task> The page.
+     */
+    private function queue(?TaskStatus $status, int $limit, ?array $after): Collection
+    {
+        return Task::query()
             ->when($status instanceof TaskStatus, fn (Builder $query) => $query->where('status', $status?->value))
             ->when($after !== null, function (Builder $query) use ($after): void {
                 $priority = $after['priority'] ?? 0;
@@ -86,21 +165,6 @@ final class TaskList
             ->orderBy('id')
             ->limit(max(1, min($limit, self::MAX_PAGE)))
             ->get();
-
-        $logins = $this->logins->forSessions([
-            ...$tasks->pluck('created_by')->all(),
-            ...$tasks->pluck('claimed_by')->all(),
-        ]);
-
-        $last = $tasks->last();
-
-        return [
-            'tasks' => array_values(array_map(
-                fn (Task $task): array => $this->describe($task, $logins, $reader, $asCoordinator),
-                $tasks->all()
-            )),
-            'cursor' => $last instanceof Task ? ['priority' => $last->priority, 'id' => $last->id] : null,
-        ];
     }
 
     /**
@@ -108,16 +172,11 @@ final class TaskList
      *
      * @param  Task  $task  The task.
      * @param  array<int, string>  $logins  GitHub logins, keyed by agent session ID.
-     * @param  AgentSession  $reader  The session doing the reading.
-     * @param  bool  $asCoordinator  Whether the reader holds `coordinator:direct`.
+     * @param  bool  $readable  Whether this reader may see the task's content.
      * @return array<string, mixed> The task.
      */
-    private function describe(Task $task, array $logins, AgentSession $reader, bool $asCoordinator): array
+    private function describe(Task $task, array $logins, bool $readable): array
     {
-        // The same audience #16 decided may act on this task, plus a coordinator, which is the same
-        // pair #29 uses for narration. Everyone else is told the task exists and not what it says.
-        $readable = $asCoordinator || $task->isClaimableBy($reader);
-
         return [
             'id' => $task->id,
             'parent_task_id' => $task->parent_task_id,

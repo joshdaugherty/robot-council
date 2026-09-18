@@ -180,3 +180,74 @@ it('renders a hostile value inert whatever sink it was aimed at', function (stri
         expect($html)->not->toContain($live);
     }
 })->with(HostileContent::dataset());
+
+it('reports an interpolation in a URL attribute, and leaves a server-built URL alone', function (): void {
+    // The detector's own control. A `javascript:` URL survives `htmlspecialchars` untouched, so a
+    // guard that reported nothing here would look identical to one with nothing to report.
+    expect(urlAttributeInterpolations('<a href="{{ $task->link }}">go</a>'))
+        ->toBe(['href="$task->link"']);
+
+    // Unquoted, which breaks out on a space rather than a quote
+    expect(urlAttributeInterpolations('<img src={{ $avatar }}>'))->toBe(['src="$avatar"']);
+
+    // Every URL the server built is fine, and the package's own pages are made of these
+    expect(urlAttributeInterpolations('<form action="{{ route(\'robot-council.enroll.deny\') }}">'))->toBeEmpty();
+    expect(urlAttributeInterpolations('<img src="{{ asset(\'x.png\') }}">'))->toBeEmpty();
+
+    // Not a URL attribute, so not this check's business -- `rawOutputIn()` covers the escaping
+    expect(urlAttributeInterpolations('<p title="{{ $task->title }}">x</p>'))->toBeEmpty();
+});
+
+it('puts no requester-supplied or agent-supplied value in a URL attribute', function (): void {
+    $views = bladeTemplatesIn(__DIR__.'/../resources/views');
+
+    expect($views)->not->toBeEmpty();
+
+    $offenders = [];
+
+    foreach ($views as $view) {
+        foreach (urlAttributeInterpolations((string) file_get_contents($view)) as $finding) {
+            $offenders[] = basename($view).' -- '.$finding;
+        }
+    }
+
+    // Escaping cannot help here, so the rule is that such a value never reaches a URL at all. A
+    // page that genuinely needs one has to allowlist the scheme at the point of use and record why.
+    expect($offenders)->toBeEmpty(
+        'Interpolations in URL attributes that the server did not build:'.PHP_EOL.implode(PHP_EOL, $offenders)
+    );
+});
+
+it('shows the javascript payload is detectable, against a sink no package view has', function (): void {
+    // The corpus row aimed at a URL cannot fail against the package's own pages, because none of
+    // them puts a value in a URL attribute -- which is the guarantee the test above enforces. Left
+    // there, the row would be a tripwire nobody can trip, indistinguishable from a passing one.
+    // So it is exercised here against a deliberately unguarded sink.
+    $payload = 'javascript:alert(1)';
+
+    $unguarded = '<a href="'.e($payload).'">go</a>';
+
+    $forbidden = arrayValue(HostileContent::payloads()['a javascript URL'])['forbidden'];
+
+    $survived = array_values(array_filter(
+        arrayValue($forbidden),
+        static fn (mixed $live): bool => \is_string($live) && str_contains($unguarded, $live)
+    ));
+
+    // Escaping the payload changes nothing about it, which is the whole point of the row
+    expect(e($payload))->toBe($payload)
+        ->and($survived)->toBe(['href="javascript:']);
+});
+
+it('cannot express a URL scheme in any charset-limited field', function (string $pattern): void {
+    // Defense in depth behind the rule above: `machine_label`, `harness`, `project_id` and a lock's
+    // name are allowlisted at the edge, and none of those allowlists admits a colon, so none can
+    // carry `javascript:` even if one did reach a URL attribute.
+    expect(preg_match($pattern, 'javascript:alert(1)'))->toBe(0)
+        ->and('harmless-value')->toMatch($pattern);
+})->with([
+    'harness' => '/^[a-z0-9-]{1,32}$/D',
+    'machine_label' => '/^[A-Za-z0-9._-]{1,64}$/D',
+    'project_id' => '/^[A-Za-z0-9._\/-]{1,128}$/D',
+    'a lock name' => '/^[A-Za-z0-9._:\/-]+$/D',
+]);

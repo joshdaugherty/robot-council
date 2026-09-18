@@ -11,6 +11,37 @@ use RobotCouncil\Tests\TestCase;
 pest()->extend(TestCase::class)->in(__DIR__);
 
 /**
+ * Every Blade template under a directory, at any depth.
+ *
+ * Recursive deliberately. `glob('<dir>/*.blade.php')` matches only the top level, and a guard built
+ * on it goes on passing while a whole subdirectory of views is unexamined -- the failure looks like
+ * a clean result, because one top-level file keeps the list non-empty forever. `resources/views/`
+ * is flat today and will not stay that way.
+ *
+ * @param  string  $directory  The directory to walk.
+ * @return list<string> Absolute paths, sorted so a failure names files in a stable order.
+ */
+function bladeTemplatesIn(string $directory): array
+{
+    if (! is_dir($directory)) {
+        return [];
+    }
+
+    $templates = [];
+
+    /** @var SplFileInfo $file */
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS)) as $file) {
+        if (str_ends_with($file->getFilename(), '.blade.php')) {
+            $templates[] = $file->getPathname();
+        }
+    }
+
+    sort($templates);
+
+    return $templates;
+}
+
+/**
  * Every unescaped echo in one Blade template, as the expressions they render.
  *
  * `{!! $x !!}` writes bytes straight into the document where `{{ $x }}` runs them through

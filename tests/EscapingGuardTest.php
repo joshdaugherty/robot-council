@@ -49,11 +49,39 @@ it('detects an unescaped echo, and does not report one where there is none', fun
     expect($clean)->toBeEmpty();
 });
 
-it('renders every value in the package views escaped, with no unescaped echo anywhere', function (): void {
-    $views = glob(__DIR__.'/../resources/views/*.blade.php') ?: [];
+it('finds a template at any depth, not only at the top of the tree', function (): void {
+    // The scanner's control, and the reason it is not `glob`. A guard that walked only the top level
+    // would keep passing once #30 adds `resources/views/livewire/` -- green, and covering nothing
+    // in it. That is the failure this whole file exists to prevent, so it is not taken on trust.
+    $root = $this->temporaryDirectory('views');
 
-    // A count, printed rather than assumed: a glob that matched nothing would satisfy every
-    // assertion in the loop below and prove the opposite of what it claims
+    mkdir($root.'/livewire/partials', 0o777, recursive: true);
+
+    file_put_contents($root.'/top.blade.php', '<p>{{ $safe }}</p>');
+    file_put_contents($root.'/livewire/board.blade.php', '<p>{{ $safe }}</p>');
+    file_put_contents($root.'/livewire/partials/row.blade.php', '<td>{!! $title !!}</td>');
+
+    $found = array_map(basename(...), bladeTemplatesIn($root));
+
+    expect($found)->toBe(['board.blade.php', 'row.blade.php', 'top.blade.php']);
+
+    // And the nested one's violation is the one a top-level walk would have missed
+    $offenders = [];
+
+    foreach (bladeTemplatesIn($root) as $template) {
+        $offenders = [...$offenders, ...unescapedEchoes((string) file_get_contents($template))];
+    }
+
+    expect($offenders)->toBe(['$title']);
+});
+
+it('renders every value in the package views escaped, with no unescaped echo anywhere', function (): void {
+    $views = bladeTemplatesIn(__DIR__.'/../resources/views');
+
+    // A scan that matched nothing would satisfy every assertion in the loop below and prove the
+    // opposite of what it claims. `not->toBeEmpty()` is too weak on its own here, because one
+    // top-level view keeps it true however much of the tree goes unexamined -- which is why the
+    // scanner's own recursion is controlled in the test above rather than trusted.
     expect($views)->not->toBeEmpty();
 
     $offenders = [];

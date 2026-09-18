@@ -13,6 +13,8 @@ declare(strict_types=1);
  * @command  vendor/bin/pest --compact tests/McpToolsTest.php
  */
 
+use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\Log;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Http\Rules\BoundedMeta;
 use RobotCouncil\Models\AgentSession;
@@ -506,4 +508,63 @@ it('refuses narration from a session holding no ability at all', function (): vo
 
     expect($error)->toContain('events:post')
         ->and(FleetEvent::query()->where('type', FleetEventType::Narration)->count())->toBe(0);
+});
+
+it('never puts a credential in a tool result or in the host log', function (): void {
+    [, $coordinatorToken] = mcpCoordinator($this);
+
+    $logged = [];
+
+    Log::listen(static function (MessageLogged $entry) use (&$logged): void {
+        $logged[] = $entry->message.' '.json_encode($entry->context);
+    });
+
+    $taskId = intValue(toolResult(callTool($this, $this->token, 'task_create', ['title' => 'Work']))['task_id']);
+
+    $calls = [
+        ['task_claim', ['task_id' => $taskId]],
+        ['task_start', ['task_id' => $taskId]],
+        ['task_complete', ['task_id' => $taskId, 'result' => ['ok' => true]]],
+        ['task_list', []],
+        ['lock_acquire', ['name' => 'deploy', 'ttl' => 60]],
+        ['lock_release', ['name' => 'deploy']],
+        ['events_narrate', ['body' => 'done']],
+        ['events_read', []],
+        ['presence_heartbeat', []],
+
+        // The refusal paths too: an error message is assembled from different parts than a result,
+        // and is the half a caller sees when something went wrong
+        ['task_claim', ['task_id' => $taskId]],
+        ['task_reassign', ['task_id' => $taskId, 'session_id' => 999999]],
+    ];
+
+    $transcript = '';
+
+    foreach ($calls as [$tool, $arguments]) {
+        $transcript .= json_encode(callTool($this, $this->token, $tool, $arguments));
+        $transcript .= json_encode(callTool($this, $coordinatorToken, $tool, $arguments));
+    }
+
+    $transcript .= implode(' ', $logged);
+
+    // The plaintext credential is `<id>|<secret>`; the half after the pipe is the part that would
+    // let a holder act, and it is the half a substring search for the whole string would miss if
+    // anything logged only the tail
+    $secrets = [
+        $this->token,
+        substr($this->token, (int) strpos($this->token, '|') + 1),
+        $coordinatorToken,
+        substr($coordinatorToken, (int) strpos($coordinatorToken, '|') + 1),
+    ];
+
+    foreach ($secrets as $secret) {
+        expect(\strlen($secret))->toBeGreaterThan(20)
+            ->and($transcript)->not->toContain($secret);
+    }
+
+    // Positive control. The search above is a substring test over a transcript that has to be
+    // non-empty and has to be searchable the same way -- an empty transcript, or a transcript the
+    // tokens could never appear in, would pass every assertion above while proving nothing
+    expect($transcript)->toContain('"task_id"')
+        ->and($transcript.$this->token)->toContain($this->token);
 });

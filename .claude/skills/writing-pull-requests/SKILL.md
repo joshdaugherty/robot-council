@@ -227,7 +227,26 @@ keyword-reference pair in the plain text, same-line and cross-line alike:
   perl -0777 -ne '$n += length; while (/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:[\w.-]+\/[\w.-]+#\d+|#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+)/gi) { ($m = $&) =~ s/\s+/ /g; print "$m\n"; $h++ } END { printf "scanned %d bytes, %d keyword-reference pairs\n", $n, $h }'
 ```
 
-Every printed pair should be an issue this PR means to close. `scanned 0 bytes` is a failed read,
+Every printed pair should be an issue this PR means to close.
+
+**Make it fail rather than print.** A scan you have to read is one you can merge past, and that has
+happened: on `robot-council/core#82` the scan printed `1 fixed: #83` beside the intended
+`Closes #75`, from the sentence *"Truncation is filed rather than **fixed: #83**"* — a body saying
+the issue was **not** fixed — and the merge closed #83. The output was correct and was not acted on.
+Pass the issues the PR means to close and let the check exit non-zero on anything else:
+
+```bash
+intended="75"          # space-separated, the issues this PR should close
+{ git log --format=%B origin/main..HEAD; gh api repos/robot-council/core/pulls/<N> --jq '.title, .body'; } |
+  perl -0777 -ne 'while (/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+#(\d+)/gi) { print "$1\n" }' |
+  sort -u | while read -r n; do
+    case " $intended " in *" $n "*) ;; *) echo "UNINTENDED CLOSE: #$n"; exit 9 ;; esac
+  done || { echo "refusing to merge"; exit 9; }
+```
+
+`exit 9` inside the loop leaves the pipeline's status, so the `|| {…}` is what actually stops you —
+check it, or run the loop over a file rather than a pipe.
+ `scanned 0 bytes` is a failed read,
 not a clean result.
 
 ## Bullets, headings, tables

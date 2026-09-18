@@ -110,12 +110,20 @@ final class FleetFeed
      * The caller is responsible for having established that the reader is an allowlisted developer.
      * Nothing here checks it, because nothing here can.
      *
+     * `$before` walks backwards into older events, which is the direction a person reads a stream.
+     * Without it the panel would show a fixed window of the head and everything older would be
+     * unreachable -- and a feed is not a list: what falls out of the window is gone rather than
+     * merely unsorted. One presence sweep over a hundred lapsed sessions writes a hundred events in
+     * a burst, so the window turns over quickly enough for that to matter.
+     *
      * @param  int  $limit  How many to return, clamped to `MAX_PAGE`.
+     * @param  int|null  $before  The oldest event already seen, or null for the head.
      * @return list<array<string, mixed>> The events, newest first.
      */
-    public function latest(int $limit): array
+    public function latest(int $limit, ?int $before = null): array
     {
         $events = FleetEvent::query()
+            ->when($before !== null, fn (Builder $query) => $query->where('id', '<', $before))
             ->orderByDesc('id')
             ->limit(max(1, min($limit, self::MAX_PAGE)))
             ->get();

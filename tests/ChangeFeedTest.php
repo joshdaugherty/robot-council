@@ -13,6 +13,7 @@ use Livewire\Livewire;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Livewire\ChangeFeed;
 use RobotCouncil\Models\AgentSession;
+use RobotCouncil\Models\FleetEvent;
 use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Support\FleetEvents;
 use RobotCouncil\Support\FleetFeed;
@@ -59,7 +60,12 @@ it('shows an event with its type, body, actor and age', function (): void {
         ->assertSee('Rebuilding the index now.')
         ->assertSee('octodev')
         ->assertSeeHtml('<span class="badge badge-sm">'.FleetEventType::Narration->value.'</span>')
-        ->assertSee('ago');
+        ->assertSee('ago')
+
+        // Asserted absent, because nothing else in this file does. Without it the badge's condition
+        // could be deleted -- rendering `coordinator` against every row -- and the whole suite
+        // would stay green, including the test that exists to prove the flag is not retroactive.
+        ->assertDontSee('coordinator');
 });
 
 it("shows another developer's narration, which is what #73 decided", function (): void {
@@ -89,7 +95,7 @@ it('puts the newest event first', function (): void {
     $events->record(FleetEventType::Narration, $this->session, 'The older one.');
     $events->record(FleetEventType::Narration, $this->session, 'The newer one.');
 
-    Livewire::test(ChangeFeed::class)->assertSeeInOrder(['The newer one.', 'The older one.']);
+    Livewire::test(ChangeFeed::class)->assertSeeHtmlInOrder(['The newer one.', 'The older one.']);
 });
 
 it('keeps the coordinator flag as it was when the event was written', function (): void {
@@ -160,4 +166,71 @@ it('shows the feed through the gate, and refuses a stranger', function (): void 
         ->get(route('robot-council.dashboard'))
         ->assertForbidden()
         ->assertDontSee('Visible to a developer.');
+});
+
+it('reaches events older than the first page, and comes back', function (): void {
+    // #76 asked for a cursor rather than a fixed head window, and a feed is why: what falls out of
+    // a window is unreachable rather than merely unsorted. One presence sweep over a hundred lapsed
+    // sessions writes a hundred events in a burst.
+    $events = app(FleetEvents::class);
+
+    foreach (range(1, ChangeFeed::PER_PAGE + 1) as $n) {
+        // Zero-padded, because `Event number 1` is a substring of `Event number 10` and an
+        // `assertDontSee` on the unpadded form can never pass once the page holds a teens row
+        $events->record(FleetEventType::Narration, $this->session, sprintf('Event number %03d', $n));
+    }
+
+    $oldest = 'Event number 001';
+
+    $feed = Livewire::test(ChangeFeed::class);
+
+    // The newest page does not reach the oldest event
+    $feed->assertSee(sprintf('Event number %03d', ChangeFeed::PER_PAGE + 1))->assertDontSee($oldest);
+
+    $seen = FleetEvent::query()->orderByDesc('id')->skip(ChangeFeed::PER_PAGE - 1)->first();
+
+    $feed->call('showOlder', $seen?->id)->assertSee($oldest);
+
+    // And back, because a cursor that cannot be left is a trap
+    $feed->call('showLatest')->assertDontSee($oldest);
+});
+
+it('will not let the updates map move the feed cursor', function (): void {
+    Livewire::test(ChangeFeed::class)->set('before', 1);
+})->throws(CannotUpdateLockedPropertyException::class);
+
+it("does not carry an event's meta into the render context", function (): void {
+    // `meta` is up to 4096 bytes of agent-supplied structured data per row. Asserted on the view
+    // data rather than on the rendered HTML: the view renders no meta either way, so an assertion
+    // against the output cannot fail and would have passed with the projection removed. What this
+    // guards is that the data is not one `{{ }}` away from the page with nobody having re-derived
+    // whether it may be shown.
+    app(FleetEvents::class)->record(
+        FleetEventType::Narration,
+        $this->session,
+        'A body.',
+        ['client' => ['secret_looking_key' => 'should-not-render']],
+    );
+
+    $events = arrayValue(Livewire::test(ChangeFeed::class)->viewData('events'));
+
+    $newest = arrayValue($events[0] ?? []);
+
+    expect($events)->not->toBeEmpty()
+        ->and($newest)->not->toHaveKey('meta')
+        ->and($newest['body'])->toBe('A body.');
+});
+
+it('clamps what it returns however much is asked for', function (): void {
+    // `latest()` has no test of its own otherwise: every other case here reaches it through the
+    // component, which passes a constant.
+    foreach (range(1, 5) as $n) {
+        app(FleetEvents::class)->record(FleetEventType::Narration, $this->session, sprintf('Body %d', $n));
+    }
+
+    $feed = app(FleetFeed::class);
+
+    expect($feed->latest(FleetFeed::MAX_PAGE + 1000))->toHaveCount(6)
+        ->and($feed->latest(2))->toHaveCount(2)
+        ->and($feed->latest(0))->toHaveCount(1);
 });

@@ -94,20 +94,35 @@ function phpSourcesIn(string $directory): array
  */
 function urlAttributeInterpolations(string $template): array
 {
-    $withoutBlocks = preg_replace('/@verbatim(.*?)@endverbatim/s', '', $template) ?? $template;
+    $withoutBlocks = preg_replace('/(?<!@)@verbatim(.*?)@endverbatim/s', '', $template) ?? $template;
     $withoutComments = preg_replace('/\{\{--.*?--\}\}/s', '', $withoutBlocks) ?? $withoutBlocks;
 
-    $attributes = 'href|src|action|formaction|poster|cite|xlink:href|data-url';
+    $attributes = 'href|src|srcset|srcdoc|action|formaction|poster|cite|background|manifest|ping|longdesc|data|xlink:href|data-url';
 
     // Quoted and unquoted forms both, because an unquoted value breaks out on a space rather than
     // on a quote and is the easier of the two to get wrong
-    // The interpolation alternatives lead the unquoted branch, because `src={{ $x }}` holds spaces
-    // and a bare `[^\s>]+` would stop at the first one, capturing `{{` and finding nothing in it
-    $pattern = '/\b(?<attribute>'.$attributes.')\s*=\s*(?:"(?<double>[^"]*)"|\'(?<single>[^\']*)\'|(?<bare>\{\{.*?\}\}|\{!!.*?!!\}|[^\s>]+))/i';
+    // An interpolation is matched as a unit in every branch. In a quoted value that is because a
+    // `"` inside the expression -- `href="{{ $task->urlFor("view") }}"` is ordinary Blade -- would
+    // otherwise end the capture early, leave no complete interpolation in it, and consume past the
+    // real closing quote so nothing was rescanned. In an unquoted value it is because `src={{ $x }}`
+    // holds spaces and a bare `[^\s>]+` stops at the first one. `s` so a expression may span lines.
+    $span = '\{\{.*?\}\}|\{!!.*?!!\}';
+
+    $pattern = '/(?<![\w:-])(?<attribute>'.$attributes.')\s*=\s*(?:'
+        .'"(?<double>(?:'.$span.'|[^"])*)"'
+        ."|'(?<single>(?:".$span."|[^'])*)'"
+        .'|(?<bare>(?:'.$span.'|[^\s>])+)'
+        .')/is';
 
     preg_match_all($pattern, $withoutComments, $matches, PREG_SET_ORDER);
 
-    $serverBuilt = '/^\s*(?:route|url|asset|secure_url|action)\s*\(/';
+    // A literal first argument, not merely the helper's name. `url($x)` and `asset($x)` return
+    // their argument **verbatim** whenever `UrlGenerator::isValidUrl()` accepts it -- measured,
+    // `url('//evil.example/steal')` and `url('https://evil.example/x')` come back unchanged -- so
+    // an allowlist keyed on the name alone admits an off-site link or a remote script load.
+    // `route()` and `action()` are safe with any argument, because route parameters are
+    // `rawurlencode`d and the scheme is the application's, but requiring the literal costs nothing.
+    $serverBuilt = '/^\s*(?:route|url|asset|secure_url|action)\s*\(\s*[\'"]/';
 
     $offenders = [];
 
@@ -128,7 +143,9 @@ function urlAttributeInterpolations(string $template): array
                 continue;
             }
 
-            $offenders[] = $match['attribute'].'="'.$expression.'"';
+            // Whitespace collapsed, as `rawOutputIn()` does, so an expression spanning lines reads
+            // as one line in the failure message rather than breaking it across several
+            $offenders[] = $match['attribute'].'="'.trim((string) preg_replace('/\s+/', ' ', $expression)).'"';
         }
     }
 
@@ -173,7 +190,7 @@ function rawOutputIn(string $template): array
     // Taken out first, exactly as Blade takes them out first. Their contents are reported rather
     // than discarded, because a `@php` block is one of the shapes being looked for.
     $withoutBlocks = preg_replace_callback(
-        '/@verbatim(?<verbatim>.*?)@endverbatim|@php(?<php>.*?)@endphp/s',
+        '/(?<!@)@verbatim(?<verbatim>.*?)@endverbatim|(?<!@)@php(?<php>.*?)@endphp/s',
         static function (array $match) use (&$findings): string {
             if (($match['php'] ?? '') !== '') {
                 $findings[] = '@php block: '.trim((string) preg_replace('/\s+/', ' ', $match['php']));

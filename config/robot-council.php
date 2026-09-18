@@ -156,6 +156,14 @@ return [
         // batch, and every session in it takes the change feed's one writer lock in turn while
         // every agent's narration queues behind it. What is left over is marked a minute later.
         'max_per_sweep' => (int) env('ROBOT_COUNCIL_PRESENCE_MAX_PER_SWEEP', 500),
+
+        // A request refused by `rate_limits.agent_per_session` records no contact: the limiter is
+        // answered before the middleware that records it. That does not cost a busy process its
+        // session, because the limiter is a fixed window -- it lets the whole allowance through at
+        // the top of every minute, and those succeed and are contact. The margin is one minute
+        // against a threshold that is never under two, which is why `gone_after_minutes` is read as
+        // at least a minute past `stale_after_minutes` and why a configured limit is never read as
+        // zero. `tests/ThrottledPresenceTest.php` is what holds that gap open.
     ],
 
     /*

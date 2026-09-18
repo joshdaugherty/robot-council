@@ -21,19 +21,35 @@ use RuntimeException;
 final class HostKey
 {
     /**
+     * The longest host user key the package stores.
+     *
+     * Every column holding one is `varchar(64)`: `installations.user_id` and `.approved_by`,
+     * `agent_sessions.user_id`, `tasks.user_id`, `github_identities.user_id`, and
+     * `device_codes.decided_by`. A key longer than this cannot be stored, and **truncating it would
+     * be worse than refusing it** -- two developers whose keys share a 64-character prefix would
+     * collapse into one, which is an access-control failure rather than a storage one.
+     */
+    public const int MAX = 64;
+
+    /**
      * A host user key as the package stores it.
      *
      * @param  mixed  $key  Whatever the host's model or guard returned.
      * @return string The key as text.
      *
-     * @throws RuntimeException When the key is neither an integer nor a non-empty string.
+     * @throws RuntimeException When the key is neither an integer nor a non-empty string, or is
+     *                          longer than the columns that hold it.
      */
     public static function from(mixed $key): string
     {
         $value = self::tryFrom($key);
 
         if ($value === null) {
-            throw new RuntimeException(sprintf('robot-council stores a host user key as text, and this one is %s.', get_debug_type($key)));
+            throw new RuntimeException(sprintf(
+                'robot-council stores a host user key as up to %d characters of text, and this one is %s.',
+                self::MAX,
+                \is_string($key) ? sprintf('%d characters', mb_strlen($key)) : get_debug_type($key)
+            ));
         }
 
         return $value;
@@ -47,10 +63,14 @@ final class HostKey
      */
     public static function tryFrom(mixed $key): ?string
     {
-        if (\is_int($key)) {
-            return (string) $key;
+        $value = \is_int($key) ? (string) $key : $key;
+
+        if (! \is_string($value) || $value === '') {
+            return null;
         }
 
-        return \is_string($key) && $key !== '' ? $key : null;
+        // Characters, as every other bound in this package is measured. A key past this length has
+        // no column to live in, and the caller is told rather than handed a truncated one.
+        return mb_strlen($value) > self::MAX ? null : $value;
     }
 }

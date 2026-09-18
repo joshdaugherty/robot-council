@@ -10,6 +10,7 @@ use RobotCouncil\Access\Ability;
 use RobotCouncil\Access\Tokens;
 use RobotCouncil\Http\Principal;
 use RobotCouncil\Http\Rules\BoundedMeta;
+use RobotCouncil\Models\FleetEvent;
 use RobotCouncil\Models\FleetEventType;
 use RobotCouncil\Support\FleetEvents;
 use Symfony\Component\HttpFoundation\Response;
@@ -24,11 +25,6 @@ use Symfony\Component\HttpFoundation\Response;
 final class PostNarrationController
 {
     /**
-     * The longest narration body the feed accepts.
-     */
-    private const int MAX_BODY = 4000;
-
-    /**
      * Record one piece of narration.
      *
      * @param  Request  $request  The incoming request.
@@ -38,7 +34,7 @@ final class PostNarrationController
     public function __invoke(Request $request, FleetEvents $events): JsonResponse
     {
         $request->validate([
-            'body' => ['required', 'string', 'max:'.self::MAX_BODY],
+            'body' => ['required', 'string', 'max:'.FleetEvent::MAX_BODY],
             'meta' => ['sometimes', 'array', new BoundedMeta],
         ]);
 

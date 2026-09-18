@@ -7,6 +7,7 @@ namespace RobotCouncil\Support;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 use RobotCouncil\Access\Ability;
 use RobotCouncil\Access\Tokens;
 use RobotCouncil\Models\AgentSession;
@@ -43,6 +44,27 @@ final class Installations
      */
     public function createFrom(DeviceCode $code): IssuedCredential
     {
+        // Re-checked rather than trusted, although `DeviceCodes::issue()` has already bounded these.
+        // `createFrom()` takes a model, and a caller can hand it one it built itself rather than one
+        // this package wrote -- so the copy forward is its own entry point into every column the
+        // create below writes. **All five of them, not the two that are obviously text**: the
+        // decider's key lands in `user_id` AND `approved_by`, both `varchar(64)`, and the IP in a
+        // `varchar(45)`. Checking a subset would leave exactly the "one call, three outcomes" this
+        // guard exists to close.
+        MachineIdentity::ensure($code->harness, $code->machine_label);
+
+        // Through `HostKey`, which is where the 64-character bound on a host user key lives, rather
+        // than a length test written again here
+        HostKey::from($code->decided_by);
+
+        if ($code->requested_ip !== null && mb_strlen($code->requested_ip) > DeviceCodes::MAX_REQUESTED_IP) {
+            throw new InvalidArgumentException(sprintf(
+                'A requested IP is limited to %d characters, and this one is %d.',
+                DeviceCodes::MAX_REQUESTED_IP,
+                mb_strlen($code->requested_ip)
+            ));
+        }
+
         return DB::transaction(function () use ($code): IssuedCredential {
             $installation = Installation::query()->create([
                 'user_id' => $code->decided_by,

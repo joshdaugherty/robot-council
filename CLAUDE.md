@@ -36,6 +36,12 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
 - **Read what Rector does to a queued job.** It renamed a private `retryAfter()` helper to `backoff()`, which is a framework hook, so `Illuminate\Queue\Queue` began calling it with a signature it does not have; it also rewrote `public int $tries` into `#[Tries(5)]`. Neither is announced. Do not name anything on a job `retryAfter` or `backoff`.
 - `database/migrations/` — the package's own tables, loaded by the provider so `php artisan migrate` picks them up. `robot_council_agent_sessions.last_seen_at` is a non-nullable `dateTime` rather than a `timestamp`: MySQL gives the first NOT NULL `TIMESTAMP` column an implicit `ON UPDATE CURRENT_TIMESTAMP` while `explicit_defaults_for_timestamp` is off, so marking a session stale would restart the clock deciding when it goes, and nullable would exempt a row from both cutoffs forever. `robot_council_github_identities` maps a host user to a GitHub account, and the package owns it because that mapping is what the access lists are checked against. `robot_council_installations`, `robot_council_agent_sessions`, and `robot_council_device_codes` hold enrollment.
 - `database/stubs/` — migrations `robot-council:install` writes into the host application, because they change tables the host owns. Only nullability on `users.password` and `users.email`, skipped when already nullable. The suite runs the stub itself, so it is covered. The command also copies Sanctum's `personal_access_tokens` migration, guarding on the file-name suffix rather than the name, because a publish rewrites the timestamp.
+- `resources/css/` and `resources/dist/` — the dashboard stylesheet's source and its compiled
+  artifact. `package.json` drives the build; see the note below on why the artifact and its lockfile
+  are committed.
+- `src/Livewire/` — the dashboard's Livewire components, mounted by `routes/web.php` behind the
+  allowlist gate. Testbench registers no provider it is not told about, so `tests/TestCase.php`
+  lists Livewire's, Mary's and Blade Heroicons' providers by hand exactly as it does Socialite's.
 - `tests/` — Pest on Orchestra Testbench. `tests/Pest.php` binds `tests/TestCase.php`, which registers the service provider; `tests/ArchTest.php` applies Pest's `php()`, `security()`, and `strict()` arch presets to the package's namespaces. Tests that read data a second database connection commits belong to the `cross-connection` group, which `phpunit.xml.dist` excludes from every run that does not name it; `tests/CrossConnectionTest.php` is the pattern.
 - `.claude/rules/` loads into every session; `.claude/skills/` loads on demand.
 
@@ -58,6 +64,22 @@ A **Laravel package** (`robot-council/core`), not an application. It is the core
 
 - **Every API must exist in the lowest supported Laravel version.** `composer.json` admits Laravel `^13.23.0` (`illuminate/contracts`), but the development install resolves the newest. The floor is the lowest release CI can test: its `prefer-lowest` cells resolve `laravel/framework` v13.23.0, because `orchestra/testbench ^11.2.0` requires it. Move the constraint whenever that tested floor moves, for example after raising the Testbench constraint.
 - **Anything written into `vendor/orchestra/testbench-core/laravel/` changes what the tools see, and CI has none of it.** That skeleton is Testbench's throwaway application, and a `vendor/bin/testbench` run or a test that publishes into it leaves files behind that a fresh CI install does not have. Two costs found so far: a `.env` copied from `.env.example` supplied an `APP_KEY` the suite was relying on, and leftover `*_create_personal_access_tokens_table.php` files under its `database/migrations/` let Larastan infer `PersonalAccessToken`'s columns, so `composer analyse` passed locally and failed in CI on `Access to an undefined property`. To reproduce a CI-only analysis failure, empty that directory and delete `build/phpstan` before running. Do not write narrowing that only one side asks for: `Command::argument()` and package view strings are inferred differently depending on whether the analyzer could boot the application, so a check written for one side is reported as dead code by the other. Take `mixed` and narrow inside a helper, as `Access\Tokens` and `Console\Argument` do.
+- **The dashboard stylesheet is a committed build artifact, and `package-lock.json` is committed
+  with it.** `resources/dist/dashboard.css` is compiled by `npm run build` from
+  `resources/css/dashboard.css`, and a consuming application runs no asset build -- the decision on
+  #30. Tailwind emits only the classes it finds by scanning, so every directory holding markup this
+  package renders must be named in an `@source`, **including Mary's components under `vendor/`**,
+  which Tailwind skips by default because it honors `.gitignore` and `/vendor` is ignored here. The
+  artifact goes stale silently: a view added without a rebuild renders with the previous build's
+  classes and nothing reports it. Measured while building #72 -- the committed file was missing
+  `.card-body`, `.card-title`, `.antialiased` and `.bg-base-200`, every one a class the new layout
+  used, and the page would have rendered half-styled. `npm run check` rebuilds and compares; read
+  its exit code, because piping it through `tail` discards the `cmp` status. **`composer.lock` is
+  gitignored and `package-lock.json` is not**, and that asymmetry is deliberate: the first is a
+  library's dependency resolution, which CI should re-resolve, and the second is a build toolchain,
+  whose drift would change the bytes a consumer receives. A CI check that the artifact matches its
+  sources is #66.
+
 - **SQLite does not enforce a `varchar` length and Postgres does**, so a fixture that writes an
   overlong value passes every local run and fails only in the `postgres` job. `$table->string('x', 32)`
   is a hard limit there: Postgres answers `SQLSTATE[22001] value too long for type character

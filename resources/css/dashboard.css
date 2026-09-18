@@ -1,0 +1,15 @@
+/*
+ * The dashboard's stylesheet, compiled here and shipped built.
+ *
+ * A consuming application runs no asset build and needs no Node toolchain, which is the decision
+ * recorded on robot-council/core#30. Tailwind emits only the classes it finds by scanning source,
+ * so every directory holding markup this package renders has to be named below -- including Mary's
+ * own components, which live under `vendor/` and are therefore ignored by default, because Tailwind
+ * skips anything `.gitignore` matches and `/vendor` is ignored here.
+ */
+@import "tailwindcss";
+@plugin "daisyui";
+
+@source "../views";
+@source "../../src";
+@source "../../vendor/robsontenorio/mary/src/View/Components";
